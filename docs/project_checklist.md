@@ -7,7 +7,7 @@
 - [X] Choose the stack (Svelte + Vite + Node + Socket.IO)
 - [X] Prepare data sources (CSV packs + pack list)
 - [X] Create project structure (client/server folders)
-- [ ] Build backend room/session model
+- [X] Build backend room/session model
 - [ ] Implement realtime events (join, leave, start, next card, score update)
 - [ ] Implement CSV loader and pack filtering
 - [ ] Build lobby UI (create/join room)

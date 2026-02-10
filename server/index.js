@@ -21,6 +21,55 @@ const io = new Server(server, {
 
 const rooms = new Map();
 
+function createRoom(code, hostId, hostName) {
+    return {
+        code,
+        hostId,
+        state: "lobby",
+        players: new Map([[hostId, { id: hostId, name: hostName || "Host", teamId: null }]]),
+        teams: new Map(),
+        rules: {
+          packs: [],
+          winTarget: 10,
+          guessMode: "year",
+          timerEnabled: false,
+          timerDuration: 60,
+          teamCount: 2,
+        },
+        deck: [],
+        discard: [],
+        activeTeamId: null,
+    };
+}
+
+function createPlayer(id, name) {
+    return {
+        id,
+        name: name || "Player",
+        teamId: null,
+    };
+}
+
+function createTeam(id, name) {
+    return {
+        id,
+        name: name || "Team",
+        timeline: [],
+        score: 0,
+    };
+}
+
+function applyTeamCount(room, teamCount) {
+  room.teams = new Map();
+  for (let i = 1; i <= teamCount; i += 1) {
+    const teamId = `team-${i}`;
+    room.teams.set(teamId, createTeam(teamId, `Team ${i}`));
+  }
+  for (const player of room.players.values()) {
+    player.teamId = null;
+  }
+}
+
 function createRoomCode() {
   const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
   let code = "";
@@ -36,10 +85,9 @@ io.on("connection", (socket) => {
     while (rooms.has(code)) {
       code = createRoomCode();
     }
-    rooms.set(code, {
-      hostId: socket.id,
-      players: new Map([[socket.id, { id: socket.id, name: hostName || "Host" }]]),
-    });
+    const room = createRoom(code, socket.id, hostName);
+    applyTeamCount(room, room.rules.teamCount);
+    rooms.set(code, room);
     socket.join(code);
     socket.emit("room:created", { roomCode: code, hostId: socket.id });
   });
@@ -50,8 +98,44 @@ io.on("connection", (socket) => {
       socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
       return;
     }
-    room.players.set(socket.id, { id: socket.id, name: playerName || "Player" });
+    room.players.set(socket.id, createPlayer(socket.id, playerName));
     socket.join(roomCode);
+    io.to(roomCode).emit("room:players", {
+      players: Array.from(room.players.values()),
+    });
+  });
+
+  socket.on("team:join", ({ roomCode, teamId } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room) return;
+
+    const player = room.players.get(socket.id);
+    if (!player) return;
+
+    if (!room.teams.has(teamId)) return;
+
+    player.teamId = teamId;
+
+    io.to(roomCode).emit("room:players", {
+      players: Array.from(room.players.values()),
+    });
+  });
+
+  socket.on("rules:update", ({ roomCode, rules } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room) {
+      socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
+      return;
+    }
+    const nextRules = { ...room.rules, ...rules };
+    room.rules = nextRules;
+    if (Number.isInteger(nextRules.teamCount) && nextRules.teamCount > 0) {
+      applyTeamCount(room, nextRules.teamCount);
+    }
+    io.to(roomCode).emit("room:rules", { rules: room.rules });
+    io.to(roomCode).emit("room:teams", {
+      teams: Array.from(room.teams.values()),
+    });
     io.to(roomCode).emit("room:players", {
       players: Array.from(room.players.values()),
     });
