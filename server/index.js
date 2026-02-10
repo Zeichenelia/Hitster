@@ -139,16 +139,24 @@ function createRoomCode() {
 }
 
 io.on("connection", (socket) => {
-  socket.on("room:create", ({ hostName } = {}) => {
+  socket.on("room:create", ({ hostName, rules } = {}) => {
     let code = createRoomCode();
     while (rooms.has(code)) {
       code = createRoomCode();
     }
     const room = createRoom(code, socket.id, hostName);
-    applyTeamCount(room, room.rules.teamCount);
+    if (rules) {
+      room.rules = { ...room.rules, ...rules };
+    }
+    if (Number.isInteger(room.rules.teamCount) && room.rules.teamCount > 0) {
+      applyTeamCount(room, room.rules.teamCount);
+    }
     rooms.set(code, room);
     socket.join(code);
     socket.emit("room:created", { roomCode: code, hostId: socket.id });
+    io.to(code).emit("room:rules", { rules: room.rules });
+    io.to(code).emit("room:teams", { teams: Array.from(room.teams.values()) });
+    io.to(code).emit("room:players", { players: Array.from(room.players.values()) });
   });
 
   socket.on("room:join", ({ roomCode, playerName } = {}) => {
@@ -159,6 +167,8 @@ io.on("connection", (socket) => {
     }
     room.players.set(socket.id, createPlayer(socket.id, playerName));
     socket.join(roomCode);
+    socket.emit("room:rules", { rules: room.rules });
+    socket.emit("room:teams", { teams: Array.from(room.teams.values()) });
     io.to(roomCode).emit("room:players", {
       players: Array.from(room.players.values()),
     });
