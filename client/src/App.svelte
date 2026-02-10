@@ -330,7 +330,7 @@
   }
 
   :global(.logo-title) {
-    width: min(380px, 92vw);
+    width: min(320px, 9vw);
     height: auto;
     display: block;
     filter: drop-shadow(0 0 8px rgba(255, 120, 214, 0.35))
@@ -464,6 +464,18 @@
     gap: 8px;
   }
 
+  :global(.pack-toolbar) {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  :global(.pack-search) {
+    min-width: 200px;
+  }
+
   :global(.field) {
     display: grid;
     gap: 6px;
@@ -483,8 +495,51 @@
 
   :global(.pack-list) {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(2, 220px);
     gap: 8px 16px;
+    justify-content: center;
+  }
+
+  :global(.pack-list .pack-button:nth-last-child(1):nth-child(odd)) {
+    grid-column: 1 / -1;
+    justify-self: center;
+  }
+
+  :global(.pack-button) {
+    border: 1px solid rgba(255, 90, 130, 0.35);
+    border-radius: 14px;
+    padding: 12px 14px;
+    background: linear-gradient(180deg, rgba(26, 16, 26, 0.9), rgba(18, 12, 18, 0.92));
+    color: #ffe1ea;
+    text-align: center;
+    cursor: pointer;
+    width: 220px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: inset 0 0 0 1px rgba(20, 12, 20, 0.6), 0 10px 20px rgba(8, 6, 10, 0.35);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease,
+      background 0.15s ease, color 0.15s ease;
+  }
+
+  :global(.pack-label) {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.2;
+  }
+
+  :global(.pack-button:hover) {
+    transform: translateY(-1px);
+  }
+
+  :global(.pack-button.selected) {
+    border-color: rgba(70, 255, 160, 0.8);
+    background: linear-gradient(180deg, rgba(12, 40, 26, 0.95), rgba(10, 26, 20, 0.95));
+    color: #e6fff3;
+    box-shadow: inset 0 0 0 1px rgba(32, 120, 72, 0.45), 0 0 18px rgba(60, 240, 150, 0.35);
   }
 
   :global(.pack-item) {
@@ -496,6 +551,15 @@
   :global(.actions) {
     display: flex;
     gap: 12px;
+  }
+
+  :global(.actions.full) {
+    width: 100%;
+  }
+
+  :global(.actions.full button) {
+    width: 100%;
+    justify-content: center;
   }
 
   :global(.room-code) {

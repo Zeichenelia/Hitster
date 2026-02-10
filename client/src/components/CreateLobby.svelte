@@ -13,18 +13,34 @@
   export let onCreateRoom = () => {};
   export let onSelectAllPacks = () => {};
   export let onClearPacks = () => {};
+
+  let packSearch = "";
+  const defaultHostName = "Host";
+
+  const isPackSelected = (packId) => selectedPackIds.includes(packId);
+
+  const togglePack = (packId) => {
+    if (isPackSelected(packId)) {
+      selectedPackIds = selectedPackIds.filter((id) => id !== packId);
+      return;
+    }
+    selectedPackIds = [...selectedPackIds, packId];
+  };
+
+  $: filteredPacks = packs.filter((pack) => {
+    const name = (pack.name || "").toLowerCase();
+    return name.includes(packSearch.trim().toLowerCase());
+  });
+
+  const clearDefaultHostName = () => {
+    if (hostName === defaultHostName) {
+      hostName = "";
+    }
+  };
 </script>
 
-<header class="top">
-  <div>
-    <span class="tag">Hitster Create Lobby</span>
-    <h1>Set your rules, then create the room.</h1>
-    <p class="subtitle">Packs, teams, and timer are locked in at creation.</p>
-  </div>
-  <div class="status-card">
-    <span class="label">Status</span>
-    <strong>{status}</strong>
-  </div>
+<header class="top top-center logo-header">
+  <img class="logo-title" src="/assets/hitster-logo.png" alt="Hitster" />
 </header>
 
 {#if lastError}
@@ -40,7 +56,12 @@
       <h2>Host setup</h2>
       <div class="field">
         <label for="host-name">Host name</label>
-        <input id="host-name" bind:value={hostName} placeholder="Your name" />
+        <input
+          id="host-name"
+          bind:value={hostName}
+          placeholder="Your name"
+          on:focus={clearDefaultHostName}
+        />
       </div>
       <div class="field-row">
         <div class="field">
@@ -80,24 +101,38 @@
           <button class="ghost" on:click={onClearPacks}>Clear</button>
         </div>
       </div>
-      <p class="hint">Selected: {selectedPackIds.length} of {packs.length}</p>
+      <div class="pack-toolbar">
+        <p class="hint">Selected: {selectedPackIds.length} of {packs.length}</p>
+        <input
+          class="pack-search"
+          type="search"
+          placeholder="Search packs"
+          bind:value={packSearch}
+        />
+      </div>
       {#if packsLoading}
         <p>Loading packs...</p>
       {:else if packs.length === 0}
         <p>No packs available.</p>
+      {:else if filteredPacks.length === 0}
+        <p>No packs match your search.</p>
       {:else}
         <div class="pack-list">
-          {#each packs as pack}
-            <label class="pack-item">
-              <input type="checkbox" value={pack.id} bind:group={selectedPackIds} />
-              <span>{pack.name}</span>
-            </label>
+          {#each filteredPacks as pack}
+            <button
+              type="button"
+              class="pack-button"
+              class:selected={isPackSelected(pack.id)}
+              on:click={() => togglePack(pack.id)}
+            >
+              <span class="pack-label">{pack.name}</span>
+            </button>
           {/each}
         </div>
       {/if}
     </div>
 
-    <div class="actions">
+    <div class="actions full">
       <button class="primary" on:click={onCreateRoom}>Create room</button>
     </div>
   </div>

@@ -1,47 +1,47 @@
 [
   {
     "id": "hitster-de",
-    "name": "Hitster Deutschland",
+    "name": "Hitster",
     "file": "data/playlists/hitster-de.csv"
   },
   {
     "id": "hitster-de-aaaa0007",
-    "name": "Hitster Deutschland Schlagerparty",
+    "name": "Hitster Schlagerparty",
     "file": "data/playlists/hitster-de-aaaa0007.csv"
   },
   {
     "id": "hitster-de-aaaa0012",
-    "name": "Hitster Deutschland Summer Party",
+    "name": "Hitster Summer Party",
     "file": "data/playlists/hitster-de-aaaa0012.csv"
   },
   {
     "id": "hitster-de-aaaa0015",
-    "name": "Hitster Deutschland Guilty Pleasures",
+    "name": "Hitster Guilty Pleasures",
     "file": "data/playlists/hitster-de-aaaa0015.csv"
   },
   {
     "id": "hitster-de-aaaa0019",
-    "name": "Hitster Deutschland Bingo",
+    "name": "Hitster Bingo",
     "file": "data/playlists/hitster-de-aaaa0019.csv"
   },
   {
     "id": "hitster-de-aaaa0025",
-    "name": "Hitster Deutschland Bayern 1 Expansion Pack",
+    "name": "Hitster Bayern 1",
     "file": "data/playlists/hitster-de-aaaa0025.csv"
   },
   {
     "id": "hitster-de-aaaa0026",
-    "name": "Hitster Deutschland Movies & TV Soundtracks Expansion Pack",
+    "name": "Hitster Movies & TV Soundtracks",
     "file": "data/playlists/hitster-de-aaaa0026.csv"
   },
   {
     "id": "hitster-de-aaaa0039",
-    "name": "Hitster Deutschland Rock",
+    "name": "Hitster Rock",
     "file": "data/playlists/hitster-de-aaaa0039.csv"
   },
   {
     "id": "hitster-de-aaaa0040",
-    "name": "Hitster Deutschland Celebration",
+    "name": "Hitster Celebration",
     "file": "data/playlists/hitster-de-aaaa0040.csv"
   }
 ]
