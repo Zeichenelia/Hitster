@@ -94,6 +94,8 @@ function createRoom(code, hostId, hostName) {
         },
         deck: [],
         discard: [],
+        currentCard: null,
+        pendingDiscard: null,
         activeTeamId: null,
         turnOrder: [],
         turnIndex: 0,
@@ -257,6 +259,8 @@ io.on("connection", (socket) => {
 
     room.deck = shuffleDeck(deck);
     room.discard = [];
+    room.currentCard = null;
+    room.pendingDiscard = null;
 
     room.state = "playing";
     room.isSuddenDeath = false;
@@ -290,23 +294,152 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (room.currentCard) {
+      socket.emit("error", { code: "CARD_PENDING", message: "Resolve current card first" });
+      return;
+    }
+
+    if (room.pendingPlacement) {
+      socket.emit("error", { code: "PLACEMENT_PENDING", message: "Confirm placement first" });
+      return;
+    }
+
     if (room.turnOrder.length === 0) {
       room.turnOrder = Array.from(room.teams.keys());
     }
-    const nextIndex = (room.turnIndex + 1) % room.turnOrder.length;
-    room.turnIndex = nextIndex;
-    room.activeTeamId = room.turnOrder[nextIndex];
+
+    if (room.pendingDiscard) {
+      room.discard.push(room.pendingDiscard);
+      room.pendingDiscard = null;
+    }
 
     if (room.deck.length !== 0) {
-        const nextCard = room.deck.pop();
-        io.to(roomCode).emit("game:next-turn", {
-            activeTeamId: room.activeTeamId,
-            card: nextCard,
-            remainingCards: room.deck.length,
-        });
+      const nextCard = room.deck.pop();
+      room.currentCard = nextCard;
+      io.to(roomCode).emit("game:next-turn", {
+        activeTeamId: room.activeTeamId,
+        card: { id: nextCard.id, url: nextCard.url || "" },
+        remainingCards: room.deck.length,
+      });
     } else {
       io.to(roomCode).emit("game:deck-empty", { remainingCards: 0 });
     }
+  });
+
+  socket.on("game:place-card", ({ roomCode, teamId, position } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room) {
+      socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
+      return;
+    }
+    if (room.state !== "playing") {
+      socket.emit("error", { code: "GAME_NOT_STARTED", message: "Game has not started" });
+      return;
+    }
+    if (!room.currentCard) {
+      socket.emit("error", { code: "NO_CARD", message: "No card to place" });
+      return;
+    }
+    if (teamId !== room.activeTeamId) {
+      socket.emit("error", { code: "NOT_ACTIVE_TEAM", message: "Not your turn" });
+      return;
+    }
+    const team = room.teams.get(teamId);
+    if (!team) {
+      socket.emit("error", { code: "TEAM_NOT_FOUND", message: "Team not found" });
+      return;
+    }
+
+    const timeline = team.timeline || [];
+    const index = timeline.length === 0 ? 0 : Math.max(0, Math.min(Number(position) || 0, timeline.length));
+
+    if (timeline.length === 0) {
+      team.score += 1;
+      team.timeline = [room.currentCard];
+      const revealedCard = room.currentCard;
+      room.currentCard = null;
+      room.turnIndex = (room.turnIndex + 1) % room.turnOrder.length;
+      room.activeTeamId = room.turnOrder[room.turnIndex];
+
+      io.to(roomCode).emit("game:card-revealed", {
+        teamId: team.id,
+        card: revealedCard,
+        correct: true,
+        position: 0,
+        activeTeamId: room.activeTeamId,
+        remainingCards: room.deck.length,
+      });
+      io.to(roomCode).emit("room:teams", { teams: Array.from(room.teams.values()) });
+      return;
+    }
+
+    room.pendingPlacement = { teamId, position: index };
+
+    io.to(roomCode).emit("game:card-placed", {
+      teamId,
+      position: index,
+    });
+  });
+
+  socket.on("game:reveal-card", ({ roomCode } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room) {
+      socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
+      return;
+    }
+    if (room.state !== "playing") {
+      socket.emit("error", { code: "GAME_NOT_STARTED", message: "Game has not started" });
+      return;
+    }
+    if (!room.currentCard || !room.pendingPlacement) {
+      socket.emit("error", { code: "NO_PLACEMENT", message: "No card placement to reveal" });
+      return;
+    }
+    if (room.pendingPlacement.teamId !== room.activeTeamId) {
+      socket.emit("error", { code: "NOT_ACTIVE_TEAM", message: "Not your turn" });
+      return;
+    }
+
+    const team = room.teams.get(room.activeTeamId);
+    if (!team) {
+      socket.emit("error", { code: "TEAM_NOT_FOUND", message: "Team not found" });
+      return;
+    }
+
+    const normalizeYear = (value) => {
+      const parsed = Number.parseInt(value, 10);
+      return Number.isNaN(parsed) ? 0 : parsed;
+    };
+
+    const timeline = team.timeline || [];
+    const index = room.pendingPlacement.position;
+    const cardYear = normalizeYear(room.currentCard.year);
+    const prevYear = index > 0 ? normalizeYear(timeline[index - 1].year) : -Infinity;
+    const nextYear = index < timeline.length ? normalizeYear(timeline[index].year) : Infinity;
+    const correct = timeline.length === 0 ? true : (cardYear >= prevYear && cardYear <= nextYear);
+
+    if (correct) {
+      team.score += 1;
+      team.timeline = [...timeline.slice(0, index), room.currentCard, ...timeline.slice(index)];
+    } else {
+      room.pendingDiscard = room.currentCard;
+    }
+
+    const revealedCard = room.currentCard;
+    room.currentCard = null;
+    room.pendingPlacement = null;
+    room.turnIndex = (room.turnIndex + 1) % room.turnOrder.length;
+    room.activeTeamId = room.turnOrder[room.turnIndex];
+
+    io.to(roomCode).emit("game:card-revealed", {
+      teamId: team.id,
+      card: revealedCard,
+      correct,
+      position: index,
+      activeTeamId: room.activeTeamId,
+      remainingCards: room.deck.length,
+    });
+    io.to(roomCode).emit("room:teams", { teams: Array.from(room.teams.values()) });
   });
 
   socket.on("game:score-update", ({ roomCode, teamId, card, correct } = {}) => {
@@ -339,6 +472,9 @@ io.on("connection", (socket) => {
       score: team.score,
       timelineLength: team.timeline.length,
       remainingCards: room.deck.length,
+    });
+    io.to(roomCode).emit("room:teams", {
+      teams: Array.from(room.teams.values()),
     });
 
     const isRoundEnd = (room.turnIndex + 1) % room.turnOrder.length === 0;

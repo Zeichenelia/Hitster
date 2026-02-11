@@ -3,6 +3,7 @@
   import { io } from "socket.io-client";
   import CreateLobby from "./components/CreateLobby.svelte";
   import LobbyView from "./components/LobbyView.svelte";
+  import GameView from "./components/GameView.svelte";
 
   const socket = io("http://localhost:3001");
 
@@ -25,6 +26,18 @@
   let rules = null;
   let baseUrl = "";
   let gameState = "lobby";
+  let activeTeamId = "";
+  let currentCard = null;
+  let remainingCards = 0;
+  let lastRevealedCard = null;
+  let lastRevealCorrect = true;
+  let lastRevealPosition = -1;
+  let lastRevealTeamId = "";
+  let lastPlacedCardId = "";
+  let lastPlacedTeamId = "";
+  let autoPlacedCardId = "";
+  let pendingPlacement = null;
+  let audioUrl = "";
   let leftTeams = [];
   let rightTeams = [];
 
@@ -71,11 +84,50 @@
 
   socket.on("game:started", (payload) => {
     gameState = "playing";
+    activeTeamId = payload.activeTeamId || "";
+    currentCard = null;
+    remainingCards = payload.remainingCards ?? 0;
     console.log("game started", payload);
   });
 
   socket.on("game:next-turn", (payload) => {
+    activeTeamId = payload.activeTeamId || "";
+    currentCard = payload.card || null;
+    audioUrl = payload.card?.url || "";
+    remainingCards = payload.remainingCards ?? remainingCards;
+    lastRevealedCard = null;
+    lastRevealCorrect = true;
+    lastRevealPosition = -1;
+    lastRevealTeamId = "";
+    lastPlacedCardId = "";
+    lastPlacedTeamId = "";
+    autoPlacedCardId = "";
+    pendingPlacement = null;
     console.log("next turn", payload);
+  });
+
+  socket.on("game:card-placed", (payload) => {
+    pendingPlacement = {
+      teamId: payload.teamId || "",
+      position: payload.position ?? -1,
+    };
+    console.log("card placed", payload);
+  });
+
+  socket.on("game:card-revealed", (payload) => {
+    activeTeamId = payload.activeTeamId || activeTeamId;
+    remainingCards = payload.remainingCards ?? remainingCards;
+    currentCard = null;
+    audioUrl = payload.card?.url || "";
+    lastRevealCorrect = Boolean(payload.correct);
+    lastRevealedCard = payload.correct ? null : payload.card || null;
+    lastRevealPosition = payload.correct ? -1 : payload.position ?? -1;
+    lastRevealTeamId = payload.correct ? "" : payload.teamId || "";
+    lastPlacedCardId = payload.correct ? payload.card?.id || "" : "";
+    lastPlacedTeamId = payload.correct ? payload.teamId || "" : "";
+    autoPlacedCardId = "";
+    pendingPlacement = null;
+    console.log("card revealed", payload);
   });
 
   socket.on("game:score-updated", (payload) => {
@@ -97,6 +149,7 @@
 
   socket.on("game:deck-empty", (payload) => {
     gameState = "finished";
+    remainingCards = payload.remainingCards ?? 0;
     console.log("deck empty", payload);
   });
 
@@ -201,6 +254,45 @@
     socket.emit("game:next-turn", { roomCode });
   }
 
+  function placeCard(position) {
+    if (!roomCode) {
+      lastError = "room code required";
+      return;
+    }
+    if (!activeTeamId || !currentCard) {
+      lastError = "no active card";
+      return;
+    }
+    socket.emit("game:place-card", {
+      roomCode,
+      teamId: activeTeamId,
+      position,
+    });
+    const activeTeam = teams.find((team) => team.id === activeTeamId);
+    if (activeTeam && (activeTeam.timeline || []).length > 0) {
+      pendingPlacement = {
+        teamId: activeTeamId,
+        position,
+      };
+    }
+  }
+
+  function revealCard() {
+    if (!roomCode) {
+      lastError = "room code required";
+      return;
+    }
+    socket.emit("game:reveal-card", { roomCode });
+  }
+
+  $: if (currentCard && activeTeamId) {
+    const activeTeam = teams.find((team) => team.id === activeTeamId);
+    if (activeTeam && (activeTeam.timeline || []).length === 0 && autoPlacedCardId !== currentCard.id) {
+      autoPlacedCardId = currentCard.id;
+      placeCard(0);
+    }
+  }
+
   function joinTeam(teamId) {
     if (!roomCode) {
       lastError = "room code required";
@@ -216,12 +308,16 @@
 
   $: leftTeams = teams.filter((_, index) => index % 2 === 0);
   $: rightTeams = teams.filter((_, index) => index % 2 === 1);
+  $: isLobbyScreen = view === "create" || gameState === "lobby";
 </script>
 
-<main class="page">
+<main
+  class="page"
+  class:game-page={gameState === "playing" || gameState === "finished"}
+  class:lobby-compact={isLobbyScreen}
+>
   {#if view === "create"}
     <CreateLobby
-      {status}
       {lastError}
       bind:hostName
       bind:teamCount
@@ -235,6 +331,28 @@
       onCreateRoom={createRoom}
       onSelectAllPacks={selectAllPacks}
       onClearPacks={clearPacks}
+    />
+  {:else if gameState === "playing" || gameState === "finished"}
+    <GameView
+      {players}
+      {teams}
+      {rules}
+      {isHost}
+      {gameState}
+      {activeTeamId}
+      {currentCard}
+      {audioUrl}
+      {lastPlacedCardId}
+      {lastPlacedTeamId}
+      {lastRevealedCard}
+      {lastRevealCorrect}
+      {lastRevealPosition}
+      {lastRevealTeamId}
+      {pendingPlacement}
+      {socketId}
+      onNextTurn={nextTurn}
+      onPlaceCard={placeCard}
+      onRevealCard={revealCard}
     />
   {:else}
     <LobbyView
@@ -269,11 +387,23 @@
     --accent: #ff3bd4;
     --accent-2: #ff7ae6;
     --shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+    --drawn-card-width: clamp(120px, 12vw, 160px);
+    --drawn-card-height: 160px;
+  }
+
+  :global(html) {
+    min-height: 100%;
+    background: radial-gradient(circle at top, #1a1026 0%, #0b0b0f 45%, #060607 100%);
+    background-repeat: no-repeat;
+    background-attachment: fixed;
   }
 
   :global(body) {
     margin: 0;
+    min-height: 100vh;
     background: radial-gradient(circle at top, #1a1026 0%, #0b0b0f 45%, #060607 100%);
+    background-repeat: no-repeat;
+    background-attachment: fixed;
     color: var(--text);
   }
 
@@ -282,6 +412,14 @@
     padding: clamp(6px, 1.2vw, 16px) clamp(14px, 2.4vw, 22px) clamp(18px, 3vw, 40px);
     max-width: 1100px;
     margin: 0 auto;
+  }
+
+  :global(.page.game-page) {
+    max-width: 100%;
+  }
+
+  :global(.page.lobby-compact) {
+    padding: clamp(4px, 0.9vw, 12px) clamp(10px, 1.8vw, 18px) clamp(12px, 2.2vw, 26px);
   }
 
   :global(.top) {
@@ -330,11 +468,30 @@
   }
 
   :global(.logo-title) {
-    width: min(320px, 9vw);
+    width: min(320px, 88vw);
     height: auto;
     display: block;
     filter: drop-shadow(0 0 8px rgba(255, 120, 214, 0.35))
       drop-shadow(0 0 18px rgba(255, 82, 200, 0.3));
+  }
+
+  :global(.page.lobby-compact .logo-title) {
+    width: min(240px, 72vw);
+  }
+
+  :global(.logo-title.logo-small) {
+    width: min(180px, 40vw);
+  }
+
+  :global(.game-header) {
+    display: grid;
+    gap: 10px;
+  }
+
+  :global(.game-actions) {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
   }
 
   :global(.logo-header) {
@@ -408,6 +565,10 @@
     gap: 20px;
   }
 
+  :global(.page.lobby-compact .layout) {
+    gap: 12px;
+  }
+
   :global(.layout.single) {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -415,6 +576,10 @@
   :global(.column) {
     display: grid;
     gap: clamp(10px, 2vw, 16px);
+  }
+
+  :global(.page.lobby-compact .column) {
+    gap: 10px;
   }
 
   :global(.card) {
@@ -427,11 +592,520 @@
     gap: clamp(8px, 1.6vw, 12px);
   }
 
+  :global(.page.lobby-compact .card) {
+    padding: clamp(10px, 1.6vw, 14px);
+    gap: 8px;
+  }
+
   :global(.lobby-frame) {
     display: grid;
     grid-template-columns: minmax(200px, 1fr) minmax(0, 1.6fr) minmax(200px, 1fr);
     gap: clamp(10px, 1.8vw, 18px);
     align-items: start;
+  }
+
+  :global(.page.lobby-compact .lobby-frame) {
+    gap: 12px;
+  }
+
+  :global(.game-frame) {
+    display: grid;
+    gap: clamp(16px, 2vw, 24px);
+  }
+
+  :global(.audio-panel) {
+    background: rgba(16, 16, 24, 0.8);
+    border-radius: 18px;
+    padding: clamp(10px, 2vw, 16px);
+    border: 1px solid var(--border);
+    display: grid;
+    gap: 10px;
+    width: min(640px, 100%);
+  }
+
+  :global(.audio-header) {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+
+  :global(.youtube-frame) {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #0b0b0f;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  :global(.youtube-frame iframe) {
+    width: 100%;
+    height: 100%;
+    border: 0;
+  }
+
+  :global(.audio-hidden) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  :global(.audio-hidden iframe) {
+    width: 1px;
+    height: 1px;
+    border: 0;
+  }
+
+  :global(.audio-controls) {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: min(520px, 100%);
+  }
+
+  :global(.audio-controls input[type="range"]) {
+    flex: 1;
+    accent-color: #ff6ec8;
+  }
+
+  :global(.volume-dock) {
+    position: fixed;
+    right: clamp(12px, 2vw, 24px);
+    bottom: clamp(12px, 2vw, 24px);
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  :global(.volume-toggle) {
+    width: 34px;
+    height: 34px;
+    border-radius: 0;
+    background: transparent;
+    border: 0;
+    display: grid;
+    place-items: center;
+    color: #ffd9f0;
+    cursor: pointer;
+    box-shadow: none;
+    line-height: 0;
+    padding: 0;
+  }
+
+  :global(.volume-toggle:focus-visible) {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(255, 110, 200, 0.45);
+  }
+
+  :global(.volume-toggle svg) {
+    width: 26px;
+    height: 26px;
+    fill: currentColor;
+    display: block;
+    transform: translateX(0);
+  }
+
+  :global(.volume-panel) {
+    position: absolute;
+    left: 50%;
+    bottom: 54px;
+    width: 44px;
+    height: 160px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: translateX(-50%);
+  }
+
+  :global(.ui-label) {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  :global(.volume-slider) {
+    position: relative;
+    width: 12px;
+    height: 150px;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    touch-action: none;
+  }
+
+  :global(.volume-track) {
+    position: absolute;
+    width: 6px;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 999px;
+  }
+
+  :global(.volume-fill) {
+    position: absolute;
+    width: 6px;
+    bottom: 0;
+    background: #ff6ec8;
+    border-radius: 999px;
+  }
+
+  :global(.volume-thumb) {
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #ff6ec8;
+    box-shadow: 0 6px 16px rgba(255, 110, 200, 0.4);
+    transform: translateY(50%);
+  }
+
+  :global(.volume-slider:focus-visible) {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(255, 110, 200, 0.45);
+    border-radius: 12px;
+  }
+
+  :global(.ui-slider::-moz-range-thumb) {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #ff6ec8;
+    border: 0;
+    box-shadow: 0 6px 16px rgba(255, 110, 200, 0.4);
+  }
+
+  :global(.drawn-card) {
+    position: fixed;
+    right: clamp(12px, 2vw, 24px);
+    top: clamp(28px, 4vh, 120px);
+    z-index: 8;
+    width: var(--drawn-card-width);
+    height: var(--drawn-card-height);
+    border-radius: 16px;
+    background: radial-gradient(circle at top, rgba(30, 30, 38, 0.95), rgba(10, 10, 14, 0.98));
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    display: grid;
+    place-items: center;
+    cursor: grab;
+  }
+
+  :global(.drag-ghost) {
+    position: fixed;
+    top: -9999px;
+    left: -9999px;
+    width: var(--drawn-card-width);
+    height: var(--drawn-card-height);
+    background: transparent;
+    border: 0;
+    display: block;
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  :global(.drag-ghost-template) {
+    position: fixed;
+    top: -9999px;
+    left: -9999px;
+    width: var(--drawn-card-width);
+    height: var(--drawn-card-height);
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  :global(.drag-ghost-template .timeline-card) {
+    width: var(--drawn-card-width);
+    height: var(--drawn-card-height);
+  }
+
+  :global(.drag-ghost .timeline-card) {
+    width: 100%;
+    height: 100%;
+  }
+
+  :global(.drawn-card:active) {
+    cursor: grabbing;
+  }
+
+  :global(.drawn-card .timeline-logo) {
+    width: 78px;
+    opacity: 0.9;
+  }
+
+  :global(.lock-in) {
+    position: fixed;
+    right: clamp(12px, 2vw, 24px);
+    top: 380px;
+    z-index: 5;
+  }
+
+  :global(.team-timelines) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  :global(.team-timeline) {
+    background: rgba(16, 16, 24, 0.7);
+    border-radius: 20px;
+    padding: clamp(12px, 2vw, 18px);
+    border: 1px solid var(--border);
+    display: grid;
+    gap: 12px;
+    width: 100%;
+  }
+
+  :global(.team-timeline.active-team) {
+    border-color: rgba(80, 255, 150, 0.85);
+    box-shadow: 0 0 0 2px rgba(80, 255, 150, 0.2), 0 0 18px rgba(80, 255, 150, 0.25);
+  }
+
+  :global(.team-header) {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+
+  :global(.team-players) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+  }
+
+  :global(.player-pill) {
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(255, 110, 200, 0.12);
+    border: 1px solid rgba(255, 110, 200, 0.28);
+    font-size: 12px;
+    color: #ffd9f0;
+  }
+
+  :global(.timeline-row) {
+    overflow-x: hidden;
+    overflow-y: visible;
+    padding-bottom: 6px;
+  }
+
+  :global(.timeline-row.has-lockin) {
+    padding-top: 44px;
+  }
+
+  :global(.timeline-row.needs-scroll) {
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+
+  :global(.timeline-cards) {
+    --timeline-card-width: clamp(120px, 12vw, 160px);
+    --drop-hit-width: 10px;
+    --springy-ease: cubic-bezier(0.34, 1.56, 0.64, 1);
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    gap: 0;
+    align-items: stretch;
+    justify-content: center;
+    min-width: 100%;
+  }
+
+  :global(.timeline-slot) {
+    display: grid;
+    perspective: 900px;
+    width: var(--timeline-card-width);
+    transition: width 0.4s var(--springy-ease), margin-right 0.4s var(--springy-ease);
+  }
+
+  :global(.timeline-slot.card-slot) {
+    margin-right: 12px;
+  }
+
+  :global(.timeline-slot.pending-slot) {
+    position: relative;
+  }
+
+  :global(.lock-in-button) {
+    position: absolute;
+    top: -34px;
+    left: 50%;
+    transform: translateX(-50%) !important;
+    z-index: 3;
+    white-space: nowrap;
+  }
+
+  :global(.lock-in-button:hover) {
+    transform: translate(-50%, -1px) !important;
+  }
+
+  :global(.timeline-slot.drop-slot) {
+    position: relative;
+    width: var(--drop-hit-width);
+    margin-right: 0;
+    transition: width 0.4s var(--springy-ease), margin-right 0.4s var(--springy-ease);
+  }
+
+  :global(.timeline-slot.drop-slot.show-drop) {
+    width: var(--timeline-card-width);
+    margin-right: 12px;
+  }
+
+  :global(.timeline-drop) {
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    min-height: 48px;
+    display: grid;
+    place-items: center;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0;
+    transform: scale(0.96);
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease, opacity 0.24s ease,
+      transform 1s var(--springy-ease);
+  }
+
+  :global(.timeline-slot.drop-slot.show-drop .timeline-drop) {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  :global(.timeline-drop.active) {
+    border-color: rgba(255, 110, 200, 0.6);
+    color: rgba(255, 214, 240, 0.85);
+    background: rgba(255, 110, 200, 0.08);
+  }
+
+  :global(.timeline-drop-label) {
+    pointer-events: none;
+  }
+
+  :global(.timeline-card) {
+    border-radius: 16px;
+    padding: 10px 12px;
+    min-height: 160px;
+    background: linear-gradient(180deg, hsl(var(--card-hue, 270deg) 55% 72%), hsl(var(--card-hue, 270deg) 48% 62%));
+    border: 2px solid rgba(0, 0, 0, 0.08);
+    color: #1a0f1e;
+    display: grid;
+    gap: 8px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  :global(.timeline-card.filled) {
+    color: #261019;
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.18);
+    transform-style: preserve-3d;
+  }
+
+  :global(.timeline-card.placed) {
+    animation: cardFlip 0.7s ease;
+  }
+
+  :global(.timeline-card.reveal) {
+    box-shadow: inset 0 0 0 2px rgba(255, 110, 200, 0.4);
+    animation: revealPulse 1.6s ease-in-out infinite;
+    transform-style: preserve-3d;
+  }
+
+  :global(.timeline-card.reveal) {
+    animation: cardFlip 0.7s ease, revealPulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes revealPulse {
+    0%, 100% {
+      box-shadow: inset 0 0 0 2px rgba(255, 110, 200, 0.35), 0 0 12px rgba(255, 110, 200, 0.2);
+    }
+    50% {
+      box-shadow: inset 0 0 0 2px rgba(255, 110, 200, 0.6), 0 0 16px rgba(255, 110, 200, 0.35);
+    }
+  }
+
+  @keyframes cardFlip {
+    0% {
+      transform: rotateY(90deg) scale(0.98);
+      opacity: 0.4;
+    }
+    60% {
+      transform: rotateY(-8deg) scale(1);
+      opacity: 1;
+    }
+    100% {
+      transform: rotateY(0deg) scale(1);
+      opacity: 1;
+    }
+  }
+
+  :global(.timeline-card.back) {
+    background: radial-gradient(circle at top, rgba(30, 30, 38, 0.95), rgba(10, 10, 14, 0.98));
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.6);
+    min-height: 160px;
+    place-items: center;
+  }
+
+  :global(.timeline-card.pending-drag) {
+    cursor: grab;
+  }
+
+  :global(.timeline-card.pending-drag:active) {
+    cursor: grabbing;
+  }
+
+  :global(.timeline-top) {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 12px;
+    color: rgba(20, 12, 22, 0.8);
+  }
+
+  :global(.timeline-artist) {
+    font-size: 12px;
+  }
+
+  :global(.timeline-center) {
+    display: grid;
+    gap: 6px;
+    place-items: center;
+  }
+
+  :global(.timeline-logo) {
+    width: 42px;
+    height: auto;
+    opacity: 0.7;
+  }
+
+  :global(.timeline-card.back .timeline-logo) {
+    width: 120px;
+    opacity: 0.85;
+  }
+
+  :global(.timeline-year) {
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+
+  :global(.timeline-title) {
+    font-size: 12px;
+    font-style: italic;
+  }
+
+
+  :global(.score-badge) {
+    background: rgba(255, 110, 200, 0.15);
+    color: #ffd9f0;
+    border: 1px solid rgba(255, 110, 200, 0.35);
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
   }
 
   :global(.lobby-center) {
@@ -450,6 +1124,12 @@
     display: grid;
     gap: 10px;
     width: 100%;
+  }
+
+  :global(.page.lobby-compact .teams-list) {
+    max-height: min(52vh, 520px);
+    overflow: auto;
+    padding-right: 6px;
   }
 
   :global(.card-head) {
@@ -494,16 +1174,24 @@
   }
 
   :global(.pack-list) {
+    --pack-button-height: 64px;
     display: grid;
     grid-template-columns: repeat(2, 220px);
+    grid-auto-rows: var(--pack-button-height);
     gap: 8px 16px;
     justify-content: center;
+    padding-top: 4px;
   }
 
-  :global(.pack-list .pack-button:nth-last-child(1):nth-child(odd)) {
-    grid-column: 1 / -1;
-    justify-self: center;
+  :global(.page.lobby-compact .pack-list) {
+    --pack-button-height: 54px;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    max-height: min(40vh, 360px);
+    overflow: auto;
+    padding-right: 6px;
+    padding-top: 4px;
   }
+
 
   :global(.pack-button) {
     border: 1px solid rgba(255, 90, 130, 0.35);
@@ -513,14 +1201,20 @@
     color: #ffe1ea;
     text-align: center;
     cursor: pointer;
-    width: 220px;
-    height: 64px;
+    width: 100%;
+    height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
     box-shadow: inset 0 0 0 1px rgba(20, 12, 20, 0.6), 0 10px 20px rgba(8, 6, 10, 0.35);
     transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease,
       background 0.15s ease, color 0.15s ease;
+  }
+
+  :global(.page.lobby-compact .pack-button) {
+    width: 100%;
+    height: 54px;
+    padding: 10px 12px;
   }
 
   :global(.pack-label) {
@@ -795,6 +1489,10 @@
     }
     :global(.lobby-center) {
       grid-column: 1 / -1;
+    }
+    :global(.timeline-cards) {
+      --timeline-card-width: clamp(110px, 14vw, 140px);
+      --drop-hit-width: 8px;
     }
   }
 </style>

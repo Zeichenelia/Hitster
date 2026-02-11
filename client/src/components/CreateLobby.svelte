@@ -1,5 +1,4 @@
 <script>
-  export let status = "";
   export let lastError = "";
   export let hostName = "";
   export let teamCount = 2;
