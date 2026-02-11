@@ -11,6 +11,7 @@
   export let hasJoined = false;
   export let joinName = "";
   export let gameState = "lobby";
+  export let playerColors = {};
   export let onJoinRoom = () => {};
   export let onJoinTeam = () => {};
   export let onStartGame = () => {};
@@ -30,27 +31,6 @@
 
   $: unassignedPlayers = players.filter((player) => !player.teamId);
 
-  const playerGlows = [
-    "#3df0ff",
-    "#ff4dcb",
-    "#58ff8a",
-    "#ffb347",
-    "#a96bff",
-    "#ff6b6b",
-    "#3dffb6",
-    "#ffd43d",
-    "#6bd4ff",
-    "#ff8a3d",
-  ];
-
-  const getPlayerGlow = (player) => {
-    const key = String(player.id || player.name || "");
-    let hash = 0;
-    for (let i = 0; i < key.length; i += 1) {
-      hash = (hash + key.charCodeAt(i) * (i + 1)) % 2147483647;
-    }
-    return playerGlows[Math.abs(hash) % playerGlows.length];
-  };
 
   const copyInviteLink = async () => {
     if (!inviteLink) {
@@ -103,7 +83,10 @@
             {:else}
               <div class="player-list">
                 {#each playersByTeam[team.id] as player}
-                  <div class="player-card" style={`--player-glow: ${getPlayerGlow(player)}`}>
+                  <div
+                    class="player-card"
+                    style={`--player-glow: ${playerColors[player.id] || "#3df0ff"}`}
+                  >
                     {player.name}
                   </div>
                 {/each}
@@ -139,7 +122,10 @@
         {:else}
           <div class="player-list">
             {#each unassignedPlayers as player}
-              <div class="player-card" style={`--player-glow: ${getPlayerGlow(player)}`}>
+              <div
+                class="player-card"
+                style={`--player-glow: ${playerColors[player.id] || "#3df0ff"}`}
+              >
                 {player.name}
               </div>
             {/each}
@@ -188,7 +174,10 @@
             {:else}
               <div class="player-list">
                 {#each playersByTeam[team.id] as player}
-                  <div class="player-card" style={`--player-glow: ${getPlayerGlow(player)}`}>
+                  <div
+                    class="player-card"
+                    style={`--player-glow: ${playerColors[player.id] || "#3df0ff"}`}
+                  >
                     {player.name}
                   </div>
                 {/each}

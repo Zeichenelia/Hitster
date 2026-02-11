@@ -2,6 +2,8 @@
   import { createEventDispatcher } from "svelte";
 
   export let winnerName = "";
+  export let winnerPlayers = [];
+  export let playerColors = {};
 
   const dispatch = createEventDispatcher();
 
@@ -28,6 +30,18 @@
   <div class="winner-content">
     <p class="winner-tag">Winner</p>
     <h1 class="winner-name">{winnerName}</h1>
+        {#if winnerPlayers.length > 0}
+      <div class="winner-players">
+        {#each winnerPlayers as player}
+          <span
+            class="winner-player"
+            style={`--player-glow: ${playerColors[player.id] || "#3df0ff"}`}
+          >
+            {player.name}
+          </span>
+        {/each}
+      </div>
+    {/if}
     <p class="win-message">hat Hitster gewonnen!</p>
     <button class="play-again-btn primary" on:click={handlePlayAgain}>Nochmal spielen</button>
   </div>
@@ -102,6 +116,25 @@
     font-size: clamp(1rem, 3vw, 1.3rem);
     margin: 0;
     color: var(--muted, #a7a8b4);
+  }
+
+  .winner-players {
+    margin-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+  }
+
+  .winner-player {
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--player-glow, #3df0ff), #0b0b0f 82%);
+    border: 1px solid color-mix(in srgb, var(--player-glow, #3df0ff), #ffffff 18%);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--player-glow, #3df0ff), #000000 55%),
+      0 0 14px color-mix(in srgb, var(--player-glow, #3df0ff), transparent 35%);
+    color: #f5f5f8;
+    font-size: 13px;
   }
 
   .play-again-btn {

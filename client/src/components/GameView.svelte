@@ -15,9 +15,12 @@
   export let lastRevealTeamId = "";
   export let pendingPlacement = null;
   export let socketId = "";
+  export let clientId = "";
+  export let playerColors = {};
   export let onNextTurn = () => {};
   export let onPlaceCard = () => {};
   export let onRevealCard = () => {};
+  export let onJoinTeam = () => {};
 
   const timelineSlots = 6;
   const logoSrc = "/assets/hitster-logo.png";
@@ -72,7 +75,7 @@
   };
 
   const handleDragStart = (event) => {
-    if (!currentCard) {
+    if (!currentCard || myTeamId !== activeTeamId) {
       event.preventDefault();
       return;
     }
@@ -96,7 +99,7 @@
 
   const handleDrop = (event, teamId, position) => {
     event.preventDefault();
-    if (!currentCard) {
+    if (!currentCard || myTeamId !== activeTeamId) {
       return;
     }
     if (teamId !== activeTeamId) {
@@ -107,7 +110,7 @@
   };
 
   const handleDragOver = (event, teamId, position) => {
-    if (!currentCard || teamId !== activeTeamId) {
+    if (!currentCard || myTeamId !== activeTeamId || teamId !== activeTeamId) {
       return;
     }
     event.preventDefault();
@@ -238,14 +241,18 @@
   }, {});
 
   $: unassignedPlayers = players.filter((player) => !player.teamId);
-  $: currentPlayer = players.find((player) => player.id === socketId) || null;
+  $: currentPlayer =
+    players.find((player) => player.clientId && player.clientId === clientId) ||
+    players.find((player) => player.id === socketId) ||
+    null;
   $: myTeamId = currentPlayer?.teamId || "";
+  $: isActiveTeamMember = myTeamId && myTeamId === activeTeamId;
 </script>
 
 <header class="top top-center logo-header game-header">
   <img class="logo-title logo-small" src="/assets/hitster-logo.png" alt="Hitster" />
   <div class="game-actions">
-    {#if isHost}
+    {#if isActiveTeamMember}
       <button class="primary" on:click={onNextTurn}>Deal next card</button>
     {/if}
     {#if gameState === "finished"}
@@ -346,7 +353,7 @@
     <div
       class="drawn-card"
       bind:this={drawnCardRef}
-      draggable
+      draggable={isActiveTeamMember}
       role="button"
       tabindex="0"
       aria-label="Drag card to timeline"
@@ -379,15 +386,25 @@
               <strong>{team.name}</strong>
               <div class="team-players">
                 {#each playersByTeam[team.id] || [] as player}
-                  <span class="player-pill">{player.name}</span>
+                  <span
+                    class="player-pill"
+                    style={`--player-glow: ${playerColors[player.id] || "#3df0ff"}`}
+                  >
+                    {player.name}
+                  </span>
                 {/each}
               </div>
             </div>
-            <span class="score-badge">{team.score ?? 0}</span>
+            <div class="team-header-actions">
+              {#if !myTeamId}
+                <button class="ghost" on:click={() => onJoinTeam(team.id)}>Join</button>
+              {/if}
+              <span class="score-badge">{team.score ?? 0}</span>
+            </div>
           </div>
           <div
             class="timeline-row"
-            class:has-lockin={pendingPlacement && team.id === pendingPlacement.teamId && (myTeamId === activeTeamId || isHost)}
+            class:has-lockin={pendingPlacement && team.id === pendingPlacement.teamId && isActiveTeamMember}
             use:autoScrollX
           >
             <div class="timeline-cards">
@@ -413,12 +430,12 @@
                   </div>
                   {#if pendingPlacement && team.id === pendingPlacement.teamId && position === pendingPlacement.position}
                     <div class="timeline-slot card-slot pending-slot">
-                      {#if myTeamId === activeTeamId || isHost}
+                      {#if isActiveTeamMember}
                         <button class="primary lock-in-button" on:click={onRevealCard}>Lock in</button>
                       {/if}
                       <div
                         class="timeline-card back pending-drag"
-                        draggable
+                        draggable={isActiveTeamMember}
                         role="button"
                         tabindex="0"
                         aria-label="Drag placed card to reposition"

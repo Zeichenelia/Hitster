@@ -77,6 +77,19 @@ function loadDeckFromPacks(packIds) {
   return cards;
 }
 
+function serializeRoomState(room) {
+  return {
+    state: room.state,
+    rules: room.rules,
+    players: Array.from(room.players.values()),
+    teams: Array.from(room.teams.values()),
+    activeTeamId: room.activeTeamId,
+    currentCard: room.currentCard ? { id: room.currentCard.id, url: room.currentCard.url || "" } : null,
+    remainingCards: room.deck.length,
+    pendingPlacement: room.pendingPlacement || null,
+  };
+}
+
 function sortTeamIds(teamIds) {
   return [...teamIds].sort((a, b) => {
     const aNum = Number.parseInt(String(a).split("-")[1], 10);
@@ -165,6 +178,7 @@ function createRoom(code, hostId, hostName) {
         deck: [],
         discard: [],
         currentCard: null,
+        pendingPlacement: null,
         pendingDiscard: null,
         activeTeamId: null,
         turnOrder: [],
@@ -177,12 +191,26 @@ function createRoom(code, hostId, hostName) {
     };
 }
 
-function createPlayer(id, name) {
+function createPlayer(id, name, clientId) {
     return {
         id,
         name: name || "Player",
         teamId: null,
+        clientId: clientId || "",
+        connected: true,
     };
+}
+
+function findPlayerByClientId(room, clientId) {
+  if (!clientId) {
+    return null;
+  }
+  for (const [socketId, player] of room.players.entries()) {
+    if (player.clientId === clientId) {
+      return { socketId, player };
+    }
+  }
+  return null;
 }
 
 function createTeam(id, name) {
@@ -215,12 +243,13 @@ function createRoomCode() {
 }
 
 io.on("connection", (socket) => {
-  socket.on("room:create", ({ hostName, rules } = {}) => {
+  socket.on("room:create", ({ hostName, rules, clientId } = {}) => {
     let code = createRoomCode();
     while (rooms.has(code)) {
       code = createRoomCode();
     }
     const room = createRoom(code, socket.id, hostName);
+    room.players.set(socket.id, createPlayer(socket.id, hostName, clientId));
     if (rules) {
       room.rules = { ...room.rules, ...rules };
     }
@@ -235,27 +264,81 @@ io.on("connection", (socket) => {
     io.to(code).emit("room:players", { players: Array.from(room.players.values()) });
   });
 
-  socket.on("room:join", ({ roomCode, playerName } = {}) => {
+  socket.on("room:join", ({ roomCode, playerName, clientId } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) {
       socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
       return;
     }
-    room.players.set(socket.id, createPlayer(socket.id, playerName));
+    const existing = findPlayerByClientId(room, clientId);
+    if (existing) {
+      room.players.delete(existing.socketId);
+      existing.player.id = socket.id;
+      existing.player.name = playerName || existing.player.name;
+      existing.player.connected = true;
+      room.players.set(socket.id, existing.player);
+    } else {
+      room.players.set(socket.id, createPlayer(socket.id, playerName, clientId));
+    }
     socket.join(roomCode);
     socket.emit("room:rules", { rules: room.rules });
     socket.emit("room:teams", { teams: Array.from(room.teams.values()) });
+    socket.emit("room:state", serializeRoomState(room));
     io.to(roomCode).emit("room:players", {
       players: Array.from(room.players.values()),
     });
   });
 
-  socket.on("team:join", ({ roomCode, teamId } = {}) => {
+  socket.on("room:sync", ({ roomCode, clientId, playerName } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room) {
+      socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
+      return;
+    }
+    let updated = false;
+    const existing = findPlayerByClientId(room, clientId);
+    if (existing) {
+      if (existing.socketId !== socket.id) {
+        room.players.delete(existing.socketId);
+        existing.player.id = socket.id;
+        room.players.set(socket.id, existing.player);
+        updated = true;
+      }
+      existing.player.name = playerName || existing.player.name;
+      existing.player.connected = true;
+    } else if (playerName) {
+      room.players.set(socket.id, createPlayer(socket.id, playerName, clientId));
+      updated = true;
+    }
+    socket.join(roomCode);
+    socket.emit("room:state", serializeRoomState(room));
+    if (updated) {
+      io.to(roomCode).emit("room:players", {
+        players: Array.from(room.players.values()),
+      });
+    }
+  });
+
+  socket.on("team:join", ({ roomCode, teamId, playerName, clientId } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) return;
 
-    const player = room.players.get(socket.id);
-    if (!player) return;
+    socket.join(roomCode);
+
+    let player = room.players.get(socket.id);
+    if (!player) {
+      const existing = findPlayerByClientId(room, clientId);
+      if (existing) {
+        room.players.delete(existing.socketId);
+        existing.player.id = socket.id;
+        existing.player.connected = true;
+        player = existing.player;
+      } else {
+        player = createPlayer(socket.id, playerName || "Player", clientId);
+      }
+      room.players.set(socket.id, player);
+    }
+    player.name = playerName || player.name;
 
     if (!room.teams.has(teamId)) return;
 
@@ -357,6 +440,7 @@ io.on("connection", (socket) => {
         turnOrder: room.turnOrder,
         remainingCards: room.deck.length,
     });
+    io.to(roomCode).emit("room:state", serializeRoomState(room));
   });
 
   socket.on("game:next-turn", ({ roomCode } = {}) => {
@@ -366,8 +450,9 @@ io.on("connection", (socket) => {
       return;
     }
 
-    if (socket.id !== room.hostId) {
-      socket.emit("error", { code: "NOT_HOST", message: "Only the host can advance the turn" });
+    const requestingPlayer = room.players.get(socket.id);
+    if (socket.id !== room.hostId && requestingPlayer?.teamId !== room.activeTeamId) {
+      socket.emit("error", { code: "NOT_ACTIVE_TEAM", message: "Not your turn" });
       return;
     }
 
@@ -416,6 +501,11 @@ io.on("connection", (socket) => {
     }
     if (room.state !== "playing") {
       socket.emit("error", { code: "GAME_NOT_STARTED", message: "Game has not started" });
+      return;
+    }
+    const requestingPlayer = room.players.get(socket.id);
+    if (!requestingPlayer || requestingPlayer.teamId !== room.activeTeamId) {
+      socket.emit("error", { code: "NOT_ACTIVE_TEAM", message: "Not your turn" });
       return;
     }
     if (!room.currentCard) {
@@ -473,6 +563,11 @@ io.on("connection", (socket) => {
     }
     if (room.state !== "playing") {
       socket.emit("error", { code: "GAME_NOT_STARTED", message: "Game has not started" });
+      return;
+    }
+    const requestingPlayer = room.players.get(socket.id);
+    if (!requestingPlayer || requestingPlayer.teamId !== room.activeTeamId) {
+      socket.emit("error", { code: "NOT_ACTIVE_TEAM", message: "Not your turn" });
       return;
     }
     if (!room.currentCard || !room.pendingPlacement) {
@@ -572,6 +667,17 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     for (const [code, room] of rooms) {
+      const player = room.players.get(socket.id);
+      if (!player) {
+        continue;
+      }
+      if (player.clientId) {
+        player.connected = false;
+        io.to(code).emit("room:players", {
+          players: Array.from(room.players.values()),
+        });
+        break;
+      }
       if (room.players.delete(socket.id)) {
         if (room.players.size === 0) {
           rooms.delete(code);
