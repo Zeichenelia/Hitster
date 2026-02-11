@@ -4,6 +4,7 @@
   import CreateLobby from "./components/CreateLobby.svelte";
   import LobbyView from "./components/LobbyView.svelte";
   import GameView from "./components/GameView.svelte";
+  import WinnerScreen from "./components/WinnerScreen.svelte";
 
   const socket = io("http://localhost:3001");
 
@@ -40,6 +41,8 @@
   let audioUrl = "";
   let leftTeams = [];
   let rightTeams = [];
+  let winnerTeamId = "";
+  let showWinner = false;
 
   let teamCount = 2;
   let winTarget = 10;
@@ -87,6 +90,13 @@
     activeTeamId = payload.activeTeamId || "";
     currentCard = null;
     remainingCards = payload.remainingCards ?? 0;
+    winnerTeamId = "";
+    showWinner = false;
+    teams = teams.map((team) => ({
+      ...team,
+      score: 0,
+      timeline: [],
+    }));
     console.log("game started", payload);
   });
 
@@ -144,12 +154,16 @@
 
   socket.on("game:win", (payload) => {
     gameState = "finished";
+    winnerTeamId = payload.teamId || "";
+    showWinner = true;
     console.log("win", payload);
   });
 
   socket.on("game:deck-empty", (payload) => {
     gameState = "finished";
     remainingCards = payload.remainingCards ?? 0;
+    winnerTeamId = "";
+    showWinner = false;
     console.log("deck empty", payload);
   });
 
@@ -246,6 +260,13 @@
     socket.emit("game:start", { roomCode });
   }
 
+  function handlePlayAgain() {
+    showWinner = false;
+    if (isHost) {
+      startGame();
+    }
+  }
+
   function nextTurn() {
     if (!roomCode) {
       lastError = "room code required";
@@ -309,6 +330,7 @@
   $: leftTeams = teams.filter((_, index) => index % 2 === 0);
   $: rightTeams = teams.filter((_, index) => index % 2 === 1);
   $: isLobbyScreen = view === "create" || gameState === "lobby";
+  $: winnerTeamName = teams.find((team) => team.id === winnerTeamId)?.name || "Team";
 </script>
 
 <main
@@ -373,6 +395,13 @@
     />
   {/if}
 </main>
+
+{#if showWinner}
+  <WinnerScreen
+    winnerName={winnerTeamName}
+    on:playAgain={handlePlayAgain}
+  />
+{/if}
 
 <style>
   @import url("https://fonts.googleapis.com/css2?family=Monoton&family=Neonderthaw&family=Sora:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap");

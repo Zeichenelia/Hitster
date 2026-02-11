@@ -77,6 +77,76 @@ function loadDeckFromPacks(packIds) {
   return cards;
 }
 
+function sortTeamIds(teamIds) {
+  return [...teamIds].sort((a, b) => {
+    const aNum = Number.parseInt(String(a).split("-")[1], 10);
+    const bNum = Number.parseInt(String(b).split("-")[1], 10);
+    return (Number.isNaN(aNum) ? 0 : aNum) - (Number.isNaN(bNum) ? 0 : bNum);
+  });
+}
+
+function resolveRoundOutcome(room, roomCode) {
+  const roundResults = room.roundResults || new Map();
+
+  if (room.isSuddenDeath) {
+    const activeTeams = room.suddenDeathTeams.length ? room.suddenDeathTeams : room.turnOrder;
+    const correctTeams = activeTeams.filter((teamId) => roundResults.get(teamId));
+    const survivors = correctTeams.length ? correctTeams : activeTeams;
+
+    if (survivors.length === 1) {
+      room.state = "finished";
+      io.to(roomCode).emit("game:win", { teamId: survivors[0] });
+      return true;
+    }
+
+    room.suddenDeathTeams = survivors;
+    room.turnOrder = sortTeamIds(survivors);
+    room.turnIndex = 0;
+    room.activeTeamId = room.turnOrder[0];
+    room.roundTurnsRemaining = room.turnOrder.length;
+    io.to(roomCode).emit("game:sudden-death", { teamIds: survivors });
+    room.roundResults = new Map();
+    return false;
+  }
+
+  const winners = Array.from(room.teams.values()).filter(
+    (candidate) => candidate.score >= room.rules.winTarget
+  );
+
+  if (winners.length === 1) {
+    room.state = "finished";
+    io.to(roomCode).emit("game:win", { teamId: winners[0].id });
+    return true;
+  }
+
+  if (winners.length > 1) {
+    room.isSuddenDeath = true;
+    room.suddenDeathTeams = winners.map((winner) => winner.id);
+    room.turnOrder = sortTeamIds(room.suddenDeathTeams);
+    room.turnIndex = 0;
+    room.activeTeamId = room.turnOrder[0];
+    room.roundTurnsRemaining = room.turnOrder.length;
+    io.to(roomCode).emit("game:sudden-death", { teamIds: room.suddenDeathTeams });
+    room.roundResults = new Map();
+    return false;
+  }
+
+  room.roundResults = new Map();
+  room.roundTurnsRemaining = room.turnOrder.length;
+  return false;
+}
+
+function advanceRound(room, roomCode) {
+  if (!room.roundTurnsRemaining || room.roundTurnsRemaining <= 0) {
+    room.roundTurnsRemaining = room.turnOrder.length;
+  }
+  room.roundTurnsRemaining = Math.max(0, room.roundTurnsRemaining - 1);
+  if (room.roundTurnsRemaining > 0) {
+    return false;
+  }
+  return resolveRoundOutcome(room, roomCode);
+}
+
 function createRoom(code, hostId, hostName) {
     return {
         code,
@@ -99,6 +169,10 @@ function createRoom(code, hostId, hostName) {
         activeTeamId: null,
         turnOrder: [],
         turnIndex: 0,
+        roundStartIndex: 0,
+        roundTurnsRemaining: 0,
+        roundResults: new Map(),
+        suddenDeathTeams: [],
         isSuddenDeath: false,
     };
 }
@@ -262,12 +336,20 @@ io.on("connection", (socket) => {
     room.currentCard = null;
     room.pendingDiscard = null;
 
+    for (const team of room.teams.values()) {
+      team.score = 0;
+      team.timeline = [];
+    }
+
     room.state = "playing";
     room.isSuddenDeath = false;
-    room.turnOrder = Array.from(room.teams.keys());
-    const idx = Math.floor(Math.random() * room.turnOrder.length);
-    room.turnIndex = idx;
-    room.activeTeamId = room.turnOrder[idx];
+    room.suddenDeathTeams = [];
+    room.roundResults = new Map();
+    room.turnOrder = sortTeamIds(Array.from(room.teams.keys()));
+    room.turnIndex = 0;
+    room.roundStartIndex = 0;
+    room.roundTurnsRemaining = room.turnOrder.length;
+    room.activeTeamId = room.turnOrder[0];
 
     io.to(roomCode).emit("game:started", {
         state: room.state,
@@ -305,7 +387,7 @@ io.on("connection", (socket) => {
     }
 
     if (room.turnOrder.length === 0) {
-      room.turnOrder = Array.from(room.teams.keys());
+      room.turnOrder = sortTeamIds(Array.from(room.teams.keys()));
     }
 
     if (room.pendingDiscard) {
@@ -358,6 +440,7 @@ io.on("connection", (socket) => {
       team.timeline = [room.currentCard];
       const revealedCard = room.currentCard;
       room.currentCard = null;
+      room.roundResults.set(team.id, true);
       room.turnIndex = (room.turnIndex + 1) % room.turnOrder.length;
       room.activeTeamId = room.turnOrder[room.turnIndex];
 
@@ -370,6 +453,7 @@ io.on("connection", (socket) => {
         remainingCards: room.deck.length,
       });
       io.to(roomCode).emit("room:teams", { teams: Array.from(room.teams.values()) });
+      advanceRound(room, roomCode);
       return;
     }
 
@@ -424,6 +508,7 @@ io.on("connection", (socket) => {
     } else {
       room.pendingDiscard = room.currentCard;
     }
+    room.roundResults.set(team.id, correct);
 
     const revealedCard = room.currentCard;
     room.currentCard = null;
@@ -440,6 +525,7 @@ io.on("connection", (socket) => {
       remainingCards: room.deck.length,
     });
     io.to(roomCode).emit("room:teams", { teams: Array.from(room.teams.values()) });
+    advanceRound(room, roomCode);
   });
 
   socket.on("game:score-update", ({ roomCode, teamId, card, correct } = {}) => {
@@ -477,26 +563,7 @@ io.on("connection", (socket) => {
       teams: Array.from(room.teams.values()),
     });
 
-    const isRoundEnd = (room.turnIndex + 1) % room.turnOrder.length === 0;
-    if (!isRoundEnd) {
-      return;
-    }
-
-    const winners = Array.from(room.teams.values()).filter(
-      (candidate) => candidate.score >= room.rules.winTarget
-    );
-
-    if (winners.length === 1) {
-      room.state = "finished";
-      io.to(roomCode).emit("game:win", { teamId: winners[0].id });
-      return;
-    }
-
-    if (winners.length > 1) {
-      room.isSuddenDeath = true;
-      io.to(roomCode).emit("game:sudden-death", {
-        teamIds: winners.map((winner) => winner.id),
-      });
+    if (advanceRound(room, roomCode)) {
       return;
     }
 
