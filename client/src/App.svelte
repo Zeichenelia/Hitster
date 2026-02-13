@@ -7,7 +7,11 @@
   import WinnerScreen from "./components/WinnerScreen.svelte";
   import JoinModal from "./components/JoinModal.svelte";
 
-  const socket = io("http://localhost:3001");
+  const defaultApiBaseUrl =
+    typeof window !== "undefined" ? window.location.origin : "http://localhost:3001";
+  const apiBaseUrl = import.meta.env.VITE_API_URL || defaultApiBaseUrl;
+  const publicAppBaseUrl = (import.meta.env.VITE_PUBLIC_APP_URL || defaultApiBaseUrl).replace(/\/$/, "");
+  const socket = io(apiBaseUrl, { transports: ["websocket", "polling"] });
 
   let roomCode = "";
   let hostName = "Host";
@@ -49,6 +53,7 @@
   let clientId = "";
   let localPrefsReady = false;
   let pendingSync = false;
+  let stateVersion = -1;
 
   let teamCount = 2;
   let winTarget = 10;
@@ -131,7 +136,7 @@
     roomCode = payload.roomCode;
     isHost = true;
     view = "lobby";
-    inviteLink = `${baseUrl}?room=${roomCode}`;
+    inviteLink = `${publicAppBaseUrl}?room=${roomCode}`;
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
       url.searchParams.set("room", roomCode);
@@ -166,6 +171,11 @@
   });
 
   socket.on("room:state", (payload) => {
+    const nextVersion = Number.isInteger(payload.version) ? payload.version : 0;
+    if (nextVersion < stateVersion) {
+      return;
+    }
+    stateVersion = nextVersion;
     rules = payload.rules || rules;
     players = payload.players || players;
     teams = payload.teams || teams;
@@ -312,7 +322,7 @@
     if (roomFromUrl) {
       roomCode = roomFromUrl.toUpperCase();
       view = "lobby";
-      inviteLink = `${baseUrl}?room=${roomCode}`;
+      inviteLink = `${publicAppBaseUrl}?room=${roomCode}`;
       if (socket.connected) {
         emitRoomSync();
       }
@@ -322,7 +332,7 @@
       pendingSync = false;
     }
     try {
-      const response = await fetch("http://localhost:3001/packs");
+      const response = await fetch(`${apiBaseUrl}/packs`);
       if (!response.ok) {
         throw new Error(`packs fetch failed: ${response.status}`);
       }
@@ -433,13 +443,6 @@
       teamId: activeTeamId,
       position,
     });
-    const activeTeam = teams.find((team) => team.id === activeTeamId);
-    if (activeTeam && (activeTeam.timeline || []).length > 0) {
-      pendingPlacement = {
-        teamId: activeTeamId,
-        position,
-      };
-    }
   }
 
   function revealCard() {
