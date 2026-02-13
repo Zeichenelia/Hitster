@@ -4,6 +4,8 @@
   import CreateLobby from "./components/CreateLobby.svelte";
   import LobbyView from "./components/LobbyView.svelte";
   import GameView from "./components/GameView.svelte";
+  import WinnerScreen from "./components/WinnerScreen.svelte";
+  import JoinModal from "./components/JoinModal.svelte";
 
   const socket = io("http://localhost:3001");
 
@@ -40,6 +42,13 @@
   let audioUrl = "";
   let leftTeams = [];
   let rightTeams = [];
+  let winnerTeamId = "";
+  let showWinner = false;
+  let winnerTimer;
+  let storedTeamId = "";
+  let clientId = "";
+  let localPrefsReady = false;
+  let pendingSync = false;
 
   let teamCount = 2;
   let winTarget = 10;
@@ -47,10 +56,75 @@
   let timerEnabled = false;
   let timerDuration = 60;
 
+  const playerGlows = [
+    "#3df0ff",
+    "#ff4dcb",
+    "#58ff8a",
+    "#ffb347",
+    "#a96bff",
+    "#ff6b6b",
+    "#3dffb6",
+    "#ffd43d",
+    "#6bd4ff",
+    "#ff8a3d",
+  ];
+
+  const getPlayerKey = (player) => String(player.id || player.name || "");
+
+  const getHashedGlow = (player) => {
+    const key = getPlayerKey(player);
+    let hash = 0;
+    for (let i = 0; i < key.length; i += 1) {
+      hash = (hash + key.charCodeAt(i) * (i + 1)) % 2147483647;
+    }
+    return playerGlows[Math.abs(hash) % playerGlows.length];
+  };
+
+  const getPlayerByClientId = (currentPlayers = players) =>
+    currentPlayers.find((player) => player.clientId && player.clientId === clientId) || null;
+
+  const emitRoomSync = () => {
+    if (!roomCode) {
+      return;
+    }
+    const shouldSendName = Boolean(storedTeamId || hasJoined);
+    const payload = {
+      roomCode,
+      clientId,
+    };
+    if (shouldSendName && joinName) {
+      payload.playerName = joinName;
+    }
+    socket.emit("room:sync", payload);
+  };
+
+  const tryAutoJoinTeam = (currentPlayers = players) => {
+    if (!roomCode || !storedTeamId || !clientId) {
+      return;
+    }
+    if (!teams.some((team) => team.id === storedTeamId)) {
+      return;
+    }
+    const currentPlayer = currentPlayers.find((player) => player.id === socketId);
+    if (currentPlayer?.teamId) {
+      return;
+    }
+    socket.emit("team:join", {
+      roomCode,
+      teamId: storedTeamId,
+      playerName: joinName || "Player",
+      clientId,
+    });
+  };
+
   socket.on("connect", () => {
     socketId = socket.id;
     status = `connected: ${socket.id}`;
-    console.log("socket connected", socket.id);
+    if (roomCode && localPrefsReady) {
+      emitRoomSync();
+    } else if (roomCode) {
+      pendingSync = true;
+    }
   });
 
   socket.on("room:created", (payload) => {
@@ -63,23 +137,65 @@
       url.searchParams.set("room", roomCode);
       window.history.replaceState({}, "", url);
     }
-    console.log("room created", payload);
   });
 
   socket.on("room:players", (payload) => {
     players = payload.players || [];
     hasJoined = players.some((player) => player.id === socketId);
-    console.log("players", payload);
+    const currentPlayer = getPlayerByClientId(players) || players.find((player) => player.id === socketId);
+    if (currentPlayer?.name && currentPlayer.name !== joinName) {
+      joinName = currentPlayer.name;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("hitster:playerName", joinName);
+      }
+    }
+    if (currentPlayer?.teamId) {
+      storedTeamId = currentPlayer.teamId;
+    } else {
+      tryAutoJoinTeam(players);
+    }
   });
 
   socket.on("room:rules", (payload) => {
     rules = payload.rules || null;
-    console.log("rules", payload);
   });
 
   socket.on("room:teams", (payload) => {
     teams = payload.teams || [];
-    console.log("teams", payload);
+    tryAutoJoinTeam();
+  });
+
+  socket.on("room:state", (payload) => {
+    rules = payload.rules || rules;
+    players = payload.players || players;
+    teams = payload.teams || teams;
+    gameState = payload.state || gameState;
+    view = "lobby";
+    activeTeamId = payload.activeTeamId || "";
+    currentCard = payload.currentCard || null;
+    audioUrl = payload.currentCard?.url || "";
+    remainingCards = payload.remainingCards ?? remainingCards;
+    pendingPlacement = payload.pendingPlacement || null;
+    lastRevealedCard = null;
+    lastRevealCorrect = true;
+    lastRevealPosition = -1;
+    lastRevealTeamId = "";
+    lastPlacedCardId = "";
+    lastPlacedTeamId = "";
+    autoPlacedCardId = "";
+    const statePlayers = payload.players || players;
+    const currentPlayer = getPlayerByClientId(statePlayers) || statePlayers.find((player) => player.id === socketId);
+    if (currentPlayer?.name && currentPlayer.name !== joinName) {
+      joinName = currentPlayer.name;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("hitster:playerName", joinName);
+      }
+    }
+    if (currentPlayer?.teamId) {
+      storedTeamId = currentPlayer.teamId;
+    } else {
+      tryAutoJoinTeam(statePlayers);
+    }
   });
 
   socket.on("game:started", (payload) => {
@@ -87,7 +203,17 @@
     activeTeamId = payload.activeTeamId || "";
     currentCard = null;
     remainingCards = payload.remainingCards ?? 0;
-    console.log("game started", payload);
+    winnerTeamId = "";
+    showWinner = false;
+    if (winnerTimer) {
+      clearTimeout(winnerTimer);
+      winnerTimer = null;
+    }
+    teams = teams.map((team) => ({
+      ...team,
+      score: 0,
+      timeline: [],
+    }));
   });
 
   socket.on("game:next-turn", (payload) => {
@@ -103,7 +229,6 @@
     lastPlacedTeamId = "";
     autoPlacedCardId = "";
     pendingPlacement = null;
-    console.log("next turn", payload);
   });
 
   socket.on("game:card-placed", (payload) => {
@@ -111,7 +236,6 @@
       teamId: payload.teamId || "",
       position: payload.position ?? -1,
     };
-    console.log("card placed", payload);
   });
 
   socket.on("game:card-revealed", (payload) => {
@@ -127,45 +251,75 @@
     lastPlacedTeamId = payload.correct ? payload.teamId || "" : "";
     autoPlacedCardId = "";
     pendingPlacement = null;
-    console.log("card revealed", payload);
   });
 
   socket.on("game:score-updated", (payload) => {
-    console.log("score updated", payload);
   });
 
   socket.on("game:round-ended", (payload) => {
-    console.log("round ended", payload);
   });
 
   socket.on("game:sudden-death", (payload) => {
-    console.log("sudden death", payload);
   });
 
   socket.on("game:win", (payload) => {
     gameState = "finished";
-    console.log("win", payload);
+    winnerTeamId = payload.teamId || "";
+    if (winnerTimer) {
+      clearTimeout(winnerTimer);
+    }
+    winnerTimer = setTimeout(() => {
+      showWinner = true;
+      winnerTimer = null;
+    }, 2500);
   });
 
   socket.on("game:deck-empty", (payload) => {
     gameState = "finished";
     remainingCards = payload.remainingCards ?? 0;
-    console.log("deck empty", payload);
+    winnerTeamId = "";
+    showWinner = false;
+    if (winnerTimer) {
+      clearTimeout(winnerTimer);
+      winnerTimer = null;
+    }
   });
 
   socket.on("error", (payload) => {
     lastError = `${payload.code}: ${payload.message}`;
-    console.log("error", payload);
   });
 
   onMount(async () => {
     baseUrl = window.location.origin;
+    const storedClientId = window.localStorage.getItem("hitster:clientId");
+    if (storedClientId) {
+      clientId = storedClientId;
+    } else if (typeof window !== "undefined") {
+      clientId = window.crypto?.randomUUID ? window.crypto.randomUUID() : `client-${Date.now()}`;
+      window.localStorage.setItem("hitster:clientId", clientId);
+    }
+    const storedJoinName = window.localStorage.getItem("hitster:playerName");
+    if (storedJoinName) {
+      joinName = storedJoinName;
+    }
+    const storedTeam = window.localStorage.getItem("hitster:teamId");
+    if (storedTeam) {
+      storedTeamId = storedTeam;
+    }
+    localPrefsReady = true;
     const params = new URLSearchParams(window.location.search);
     const roomFromUrl = params.get("room");
     if (roomFromUrl) {
       roomCode = roomFromUrl.toUpperCase();
       view = "lobby";
       inviteLink = `${baseUrl}?room=${roomCode}`;
+      if (socket.connected) {
+        emitRoomSync();
+      }
+    }
+    if (pendingSync && socket.connected && roomCode) {
+      emitRoomSync();
+      pendingSync = false;
     }
     try {
       const response = await fetch("http://localhost:3001/packs");
@@ -201,7 +355,7 @@
       return;
     }
     lastError = "";
-    socket.emit("room:create", { hostName, rules: buildRules() });
+    socket.emit("room:create", { hostName, rules: buildRules(), clientId });
   }
 
   function joinRoom() {
@@ -214,7 +368,11 @@
       return;
     }
     lastError = "";
-    socket.emit("room:join", { roomCode, playerName: joinName });
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("hitster:playerName", joinName);
+    }
+    socket.emit("room:join", { roomCode, playerName: joinName, clientId });
+    emitRoomSync();
   }
 
   function updateRules() {
@@ -244,6 +402,13 @@
       return;
     }
     socket.emit("game:start", { roomCode });
+  }
+
+  function handlePlayAgain() {
+    showWinner = false;
+    if (isHost) {
+      startGame();
+    }
   }
 
   function nextTurn() {
@@ -299,16 +464,59 @@
       return;
     }
     lastError = "";
-    socket.emit("team:join", { roomCode, teamId });
+    if (typeof window !== "undefined" && joinName) {
+      window.localStorage.setItem("hitster:playerName", joinName);
+    }
+    socket.emit("team:join", {
+      roomCode,
+      teamId,
+      playerName: joinName || "Player",
+      clientId,
+    });
+    storedTeamId = teamId;
+  }
+
+  $: if (typeof window !== "undefined") {
+    if (storedTeamId) {
+      window.localStorage.setItem("hitster:teamId", storedTeamId);
+    } else {
+      window.localStorage.removeItem("hitster:teamId");
+    }
   }
 
   onDestroy(() => {
+    if (winnerTimer) {
+      clearTimeout(winnerTimer);
+      winnerTimer = null;
+    }
     socket.disconnect();
   });
 
   $: leftTeams = teams.filter((_, index) => index % 2 === 0);
   $: rightTeams = teams.filter((_, index) => index % 2 === 1);
   $: isLobbyScreen = view === "create" || gameState === "lobby";
+  $: winnerTeamName = teams.find((team) => team.id === winnerTeamId)?.name || "Team";
+  $: winnerPlayers = players.filter((player) => player.teamId === winnerTeamId);
+  $: playerColors = (() => {
+    const sortedPlayers = [...players].sort((a, b) =>
+      getPlayerKey(a).localeCompare(getPlayerKey(b))
+    );
+    const colorMap = {};
+    if (sortedPlayers.length <= playerGlows.length) {
+      sortedPlayers.forEach((player, index) => {
+        colorMap[player.id] = playerGlows[index];
+      });
+      return colorMap;
+    }
+    sortedPlayers.forEach((player, index) => {
+      if (index < playerGlows.length) {
+        colorMap[player.id] = playerGlows[index];
+      } else {
+        colorMap[player.id] = getHashedGlow(player);
+      }
+    });
+    return colorMap;
+  })();
 </script>
 
 <main
@@ -350,9 +558,12 @@
       {lastRevealTeamId}
       {pendingPlacement}
       {socketId}
+      {clientId}
+      {playerColors}
       onNextTurn={nextTurn}
       onPlaceCard={placeCard}
       onRevealCard={revealCard}
+      onJoinTeam={joinTeam}
     />
   {:else}
     <LobbyView
@@ -364,6 +575,7 @@
       {rules}
       {isHost}
       {hasJoined}
+      {playerColors}
       bind:joinName
       {gameState}
       onJoinRoom={joinRoom}
@@ -373,6 +585,19 @@
     />
   {/if}
 </main>
+
+{#if (gameState === "playing" || gameState === "finished") && !hasJoined}
+  <JoinModal bind:joinName onJoin={joinRoom} />
+{/if}
+
+{#if showWinner}
+  <WinnerScreen
+    winnerName={winnerTeamName}
+    {winnerPlayers}
+    {playerColors}
+    on:playAgain={handlePlayAgain}
+  />
+{/if}
 
 <style>
   @import url("https://fonts.googleapis.com/css2?family=Monoton&family=Neonderthaw&family=Sora:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap");
@@ -869,6 +1094,12 @@
     gap: 12px;
   }
 
+  :global(.team-header-actions) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   :global(.team-players) {
     display: flex;
     flex-wrap: wrap;
@@ -879,10 +1110,12 @@
   :global(.player-pill) {
     padding: 4px 10px;
     border-radius: 999px;
-    background: rgba(255, 110, 200, 0.12);
-    border: 1px solid rgba(255, 110, 200, 0.28);
+    background: color-mix(in srgb, var(--player-glow, #3df0ff), #0b0b0f 82%);
+    border: 1px solid color-mix(in srgb, var(--player-glow, #3df0ff), #ffffff 18%);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--player-glow, #3df0ff), #000000 55%),
+      0 0 14px color-mix(in srgb, var(--player-glow, #3df0ff), transparent 35%);
     font-size: 12px;
-    color: #ffd9f0;
+    color: #f5f5f8;
   }
 
   :global(.timeline-row) {
