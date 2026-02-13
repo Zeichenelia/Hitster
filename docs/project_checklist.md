@@ -18,6 +18,13 @@
 - [ ] Handle basic errors (no packs selected, empty pack, invalid room)
 - [ ] Local multiplayer test with 4-6 players
 
+### Nächste konkrete Schritte
+
+- [ ] MVP End-to-End Probe: 2 Browser + 4 Testspieler in einem Raum durchspielen
+- [ ] Host/Non-Host UX prüfen (welche Buttons nur Host sieht)
+- [ ] Disconnect-Verhalten dokumentieren (aktueller Stand: Spieler wird entfernt)
+- [ ] README um kurze "Schnellstart + Testablauf"-Sektion ergänzen
+
 ## Out of Scope (Never Needed)
 
 - [ ] Accounts/registration
