@@ -184,16 +184,13 @@
     view = "lobby";
     activeTeamId = payload.activeTeamId || "";
     currentCard = payload.currentCard || null;
-    audioUrl = payload.currentCard?.url || "";
+    if (payload.currentCard?.url) {
+      audioUrl = payload.currentCard.url;
+    } else if (payload.state && payload.state !== "playing") {
+      audioUrl = "";
+    }
     remainingCards = payload.remainingCards ?? remainingCards;
     pendingPlacement = payload.pendingPlacement || null;
-    lastRevealedCard = null;
-    lastRevealCorrect = true;
-    lastRevealPosition = -1;
-    lastRevealTeamId = "";
-    lastPlacedCardId = "";
-    lastPlacedTeamId = "";
-    autoPlacedCardId = "";
     const statePlayers = payload.players || players;
     const currentPlayer = getPlayerByClientId(statePlayers) || statePlayers.find((player) => player.id === socketId);
     if (currentPlayer?.name && currentPlayer.name !== joinName) {
@@ -213,7 +210,15 @@
     gameState = "playing";
     activeTeamId = payload.activeTeamId || "";
     currentCard = null;
+    audioUrl = "";
     remainingCards = payload.remainingCards ?? 0;
+    lastRevealedCard = null;
+    lastRevealCorrect = true;
+    lastRevealPosition = -1;
+    lastRevealTeamId = "";
+    lastPlacedCardId = "";
+    lastPlacedTeamId = "";
+    autoPlacedCardId = "";
     winnerTeamId = "";
     showWinner = false;
     if (winnerTimer) {
@@ -232,13 +237,6 @@
     currentCard = payload.card || null;
     audioUrl = payload.card?.url || "";
     remainingCards = payload.remainingCards ?? remainingCards;
-    lastRevealedCard = null;
-    lastRevealCorrect = true;
-    lastRevealPosition = -1;
-    lastRevealTeamId = "";
-    lastPlacedCardId = "";
-    lastPlacedTeamId = "";
-    autoPlacedCardId = "";
     pendingPlacement = null;
   });
 

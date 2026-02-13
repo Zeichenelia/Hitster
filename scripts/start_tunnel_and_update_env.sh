@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLIENT_DIR="$ROOT_DIR/client"
 SERVER_DIR="$ROOT_DIR/server"
-VITE_CONFIG="$CLIENT_DIR/vite.config.js"
 ENV_FILE="$CLIENT_DIR/.env"
+TUNNEL_LOG="$ROOT_DIR/.cloudflared-tunnel.log"
 
 cleanup() {
   jobs -pr | xargs -r kill 2>/dev/null || true
@@ -17,34 +17,55 @@ if ! command -v cloudflared >/dev/null 2>&1; then
   exit 1
 fi
 
+upsert_env_var() {
+  local key="$1"
+  local value="$2"
+
+  if [[ -f "$ENV_FILE" ]] && grep -qE "^${key}=" "$ENV_FILE"; then
+    sed -i -E "s#^${key}=.*#${key}=${value}#" "$ENV_FILE"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+  fi
+}
+
 # Start backend
 ( cd "$SERVER_DIR" && npm run dev ) &
 
 # Wait for backend to boot
 sleep 2
 
-# --- Cloudflare tunnel and config update first ---
+# Start tunnel in background and extract URL from logs
 echo "Starting Cloudflare tunnel to frontend..."
-TUNNEL_URL=$(cloudflared tunnel --url http://localhost:5173 2>&1 | tee /dev/tty | grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' | head -n 1)
+: > "$TUNNEL_LOG"
+cloudflared tunnel --url http://localhost:5173 > "$TUNNEL_LOG" 2>&1 &
+
+TUNNEL_URL=""
+for _ in {1..30}; do
+  TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$TUNNEL_LOG" | head -n 1 || true)
+  if [[ -n "$TUNNEL_URL" ]]; then
+    break
+  fi
+  sleep 1
+done
 
 if [[ -z "$TUNNEL_URL" ]]; then
-  echo "Could not determine tunnel URL."
+  echo "Could not determine tunnel URL. cloudflared logs:"
+  cat "$TUNNEL_LOG"
   exit 1
 fi
 
-TUNNEL_HOST=$(echo "$TUNNEL_URL" | sed -E 's@https?://([^/]+)/?@\1@')
+TUNNEL_HOST="${TUNNEL_URL#https://}"
+echo "Tunnel URL: $TUNNEL_URL"
 
-awk -v host="$TUNNEL_HOST" '
-  BEGIN {in_block=0}
-  /allowedHosts:/ {print; print "      [\""host"\"],"; in_block=1; next}
-  in_block && /\[/ {next}
-  in_block && /\],/ {in_block=0; next}
-  !in_block {print}
-' "$VITE_CONFIG" > "$VITE_CONFIG.tmp" && mv "$VITE_CONFIG.tmp" "$VITE_CONFIG"
+upsert_env_var "VITE_PUBLIC_APP_URL" "$TUNNEL_URL"
+upsert_env_var "VITE_TUNNEL_HOST" "$TUNNEL_HOST"
 
-echo "VITE_PUBLIC_APP_URL=$TUNNEL_URL" > "$ENV_FILE"
-echo ".env file updated with VITE_PUBLIC_APP_URL=$TUNNEL_URL"
+echo ".env updated with:"
+echo "  VITE_PUBLIC_APP_URL=$TUNNEL_URL"
+echo "  VITE_TUNNEL_HOST=$TUNNEL_HOST"
 
-# --- Now start frontend ---
+# Start frontend
 echo "Starting frontend..."
 ( cd "$CLIENT_DIR" && npm run dev -- --host 0.0.0.0 --port 5173 ) &
+
+wait
