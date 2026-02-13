@@ -10,11 +10,11 @@
 - [X] Build backend room/session model
 - [X] Implement realtime events (join, leave, start, next card, score update)
 - [X] Implement CSV loader and pack filtering
-- [ ] Build lobby UI (create/join room)
-- [ ] Build pack selection UI (checkbox list)
-- [ ] Build game UI (card view + player list + controls)
-- [ ] Integrate YouTube playback via stored URL
-- [ ] Sync state across players
+- [X] Build lobby UI (create/join room)
+- [X] Build pack selection UI (checkbox list)
+- [X] Build game UI (card view + player list + controls)
+- [X] Integrate YouTube playback via stored URL
+- [X] Sync state across players
 - [ ] Handle basic errors (no packs selected, empty pack, invalid room)
 - [ ] Local multiplayer test with 4-6 players
 
