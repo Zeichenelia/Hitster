@@ -184,7 +184,11 @@
     view = "lobby";
     activeTeamId = payload.activeTeamId || "";
     currentCard = payload.currentCard || null;
-    audioUrl = payload.currentCard?.url || "";
+    if (payload.currentCard?.url) {
+      audioUrl = payload.currentCard.url;
+    } else if (payload.state && payload.state !== "playing") {
+      audioUrl = "";
+    }
     remainingCards = payload.remainingCards ?? remainingCards;
     pendingPlacement = payload.pendingPlacement || null;
     lastRevealedCard = null;
@@ -213,6 +217,7 @@
     gameState = "playing";
     activeTeamId = payload.activeTeamId || "";
     currentCard = null;
+    audioUrl = "";
     remainingCards = payload.remainingCards ?? 0;
     winnerTeamId = "";
     showWinner = false;
