@@ -7,6 +7,9 @@ export default defineConfig({
   plugins: [svelte()],
   server: {
     host: "0.0.0.0",
+    allowedHosts: [
+      "excellent-rough-vcr-cent.trycloudflare.com"
+    ],
     proxy: {
       "/packs": {
         target: "http://localhost:3001",

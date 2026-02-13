@@ -10,7 +10,8 @@
   const defaultApiBaseUrl =
     typeof window !== "undefined" ? window.location.origin : "http://localhost:3001";
   const apiBaseUrl = import.meta.env.VITE_API_URL || defaultApiBaseUrl;
-  const publicAppBaseUrl = (import.meta.env.VITE_PUBLIC_APP_URL || defaultApiBaseUrl).replace(/\/$/, "");
+  // Always use the current window location for the invite link base
+  const getPublicAppBaseUrl = () => (typeof window !== "undefined" ? window.location.origin : defaultApiBaseUrl);
   const socket = io(apiBaseUrl, { transports: ["websocket", "polling"] });
 
   let roomCode = "";
@@ -136,7 +137,7 @@
     roomCode = payload.roomCode;
     isHost = true;
     view = "lobby";
-    inviteLink = `${publicAppBaseUrl}?room=${roomCode}`;
+    inviteLink = `${getPublicAppBaseUrl()}?room=${roomCode}`;
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
       url.searchParams.set("room", roomCode);
@@ -322,7 +323,7 @@
     if (roomFromUrl) {
       roomCode = roomFromUrl.toUpperCase();
       view = "lobby";
-      inviteLink = `${publicAppBaseUrl}?room=${roomCode}`;
+      inviteLink = `${getPublicAppBaseUrl()}?room=${roomCode}`;
       if (socket.connected) {
         emitRoomSync();
       }
