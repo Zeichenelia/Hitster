@@ -169,6 +169,13 @@
     }
   };
 
+  const attemptPlay = () => {
+    if (!playerReady || !currentVideoId) {
+      return;
+    }
+    sendPlayerCommand("playVideo");
+  };
+
   const updateVolumeFromClientY = (clientY) => {
     if (!volumeTrackRef) {
       return;
@@ -223,6 +230,11 @@
     if (typeof window !== "undefined") {
       origin = window.location.origin;
       window.addEventListener("click", handleDocumentClick);
+      const handleFirstInteract = () => {
+        attemptPlay();
+        window.removeEventListener("pointerdown", handleFirstInteract);
+      };
+      window.addEventListener("pointerdown", handleFirstInteract, { once: true });
     }
     return () => {
       if (typeof window !== "undefined") {
@@ -344,6 +356,7 @@
           on:load={() => {
             playerReady = true;
             syncVolume();
+            attemptPlay();
           }}
         />
       {/key}
