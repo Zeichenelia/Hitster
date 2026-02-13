@@ -251,6 +251,15 @@ io.on("connection", (socket) => {
       return;
     }
 
+    const unassignedPlayers = Array.from(room.players.values()).filter((player) => !player.teamId);
+    if (unassignedPlayers.length > 0) {
+      socket.emit("error", {
+        code: "UNASSIGNED_PLAYERS",
+        message: "All players must join a team before starting the game",
+      });
+      return;
+    }
+
     const deck = loadDeckFromPacks(room.rules.packs);
     if (deck.length === 0) {
       socket.emit("error", { code: "EMPTY_DECK", message: "No cards loaded from packs" });

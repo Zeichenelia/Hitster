@@ -29,6 +29,7 @@
   }, {});
 
   $: unassignedPlayers = players.filter((player) => !player.teamId);
+  $: canStartGame = unassignedPlayers.length === 0;
 
   const playerGlows = [
     "#3df0ff",
@@ -165,7 +166,10 @@
         <h2>Host controls</h2>
         <p class="hint">Temporary controls for testing the flow.</p>
         <div class="stack">
-          <button class="primary" on:click={onStartGame}>Start game</button>
+          <button class="primary" on:click={onStartGame} disabled={!canStartGame}>Start game</button>
+          {#if !canStartGame}
+            <p class="muted">All players must join a team before game start.</p>
+          {/if}
           {#if gameState === "playing"}
             <button class="ghost" on:click={onNextTurn}>Next turn</button>
           {/if}

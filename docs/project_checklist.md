@@ -10,13 +10,20 @@
 - [X] Build backend room/session model
 - [X] Implement realtime events (join, leave, start, next card, score update)
 - [X] Implement CSV loader and pack filtering
-- [ ] Build lobby UI (create/join room)
-- [ ] Build pack selection UI (checkbox list)
-- [ ] Build game UI (card view + player list + controls)
-- [ ] Integrate YouTube playback via stored URL
-- [ ] Sync state across players
-- [ ] Handle basic errors (no packs selected, empty pack, invalid room)
+- [X] Build lobby UI (create/join room)
+- [X] Build pack selection UI (search + toggle list)
+- [X] Build game UI (card view + player list + controls)
+- [X] Integrate YouTube playback via stored URL
+- [X] Sync state across players
+- [X] Handle basic errors (no packs selected, empty pack, invalid room)
 - [ ] Local multiplayer test with 4-6 players
+
+### Nächste konkrete Schritte
+
+- [ ] MVP End-to-End Probe: 2 Browser + 4 Testspieler in einem Raum durchspielen
+- [ ] Host/Non-Host UX prüfen (welche Buttons nur Host sieht)
+- [ ] Disconnect-Verhalten dokumentieren (aktueller Stand: Spieler wird entfernt)
+- [ ] README um kurze "Schnellstart + Testablauf"-Sektion ergänzen
 
 ## Out of Scope (Never Needed)
 
