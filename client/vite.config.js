@@ -5,6 +5,21 @@ import path from "path";
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [svelte()],
+  server: {
+    host: "0.0.0.0",
+    proxy: {
+      "/packs": {
+        target: "http://localhost:3001",
+      },
+      "/health": {
+        target: "http://localhost:3001",
+      },
+      "/socket.io": {
+        target: "http://localhost:3001",
+        ws: true,
+      },
+    },
+  },
   resolve: {
     alias: {
       $lib: path.resolve(__dirname, "src/lib"),

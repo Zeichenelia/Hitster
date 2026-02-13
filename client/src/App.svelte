@@ -7,7 +7,10 @@
   import WinnerScreen from "./components/WinnerScreen.svelte";
   import JoinModal from "./components/JoinModal.svelte";
 
-  const apiBaseUrl = import.meta.env.VITE_API_URL || "http://localhost:3001";
+  const defaultApiBaseUrl =
+    typeof window !== "undefined" ? window.location.origin : "http://localhost:3001";
+  const apiBaseUrl = import.meta.env.VITE_API_URL || defaultApiBaseUrl;
+  const publicAppBaseUrl = (import.meta.env.VITE_PUBLIC_APP_URL || defaultApiBaseUrl).replace(/\/$/, "");
   const socket = io(apiBaseUrl, { transports: ["websocket", "polling"] });
 
   let roomCode = "";
@@ -133,7 +136,7 @@
     roomCode = payload.roomCode;
     isHost = true;
     view = "lobby";
-    inviteLink = `${baseUrl}?room=${roomCode}`;
+    inviteLink = `${publicAppBaseUrl}?room=${roomCode}`;
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
       url.searchParams.set("room", roomCode);
@@ -319,7 +322,7 @@
     if (roomFromUrl) {
       roomCode = roomFromUrl.toUpperCase();
       view = "lobby";
-      inviteLink = `${baseUrl}?room=${roomCode}`;
+      inviteLink = `${publicAppBaseUrl}?room=${roomCode}`;
       if (socket.connected) {
         emitRoomSync();
       }
