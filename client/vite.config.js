@@ -24,6 +24,9 @@ export default defineConfig(({ mode }) => {
         "/health": {
           target: "http://localhost:3001",
         },
+        "/pack-logo": {
+          target: "http://localhost:3001",
+        },
         "/socket.io": {
           target: "http://localhost:3001",
           ws: true,

@@ -93,10 +93,9 @@
       return null;
     }
     const fallbackAvatarPath = card.packId ? `/pack-logo/${encodeURIComponent(card.packId)}` : "";
-    const avatarUrl = card.playlistAvatarUrl || fallbackAvatarPath;
     return {
       ...card,
-      playlistAvatarUrl: avatarUrl.startsWith("/") ? `${apiBaseUrl}${avatarUrl}` : avatarUrl,
+      playlistAvatarUrl: card.playlistAvatarUrl || fallbackAvatarPath,
     };
   };
 
