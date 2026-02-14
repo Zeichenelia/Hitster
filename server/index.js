@@ -59,7 +59,7 @@ function serializeCardForClient(card) {
     packId: card.packId || "",
     packName: pack?.name || "",
     cardNumber: card.cardNumber || "",
-    playlistAvatarUrl: card.packId ? `/pack-logo/${encodeURIComponent(card.packId)}` : "",
+    playlistAvatarUrl: pack?.logo ? `/pack-logo/${encodeURIComponent(card.packId)}` : "",
   };
 }
 
