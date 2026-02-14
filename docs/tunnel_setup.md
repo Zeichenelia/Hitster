@@ -14,7 +14,7 @@ Ja: Mit einem Tunnel-Link müssen Mitspieler in der Regel **nur den Invite-Link 
    - `npm --prefix server install`
    - `npm --prefix client install`
 3. Tunnel-Dev-Stack starten:
-   - `./scripts/start_tunnel_dev.sh`
+   - `./scripts/start_tunnel_and_update_env.sh`
 4. In der `cloudflared` Ausgabe die `https://...trycloudflare.com` URL kopieren.
 5. Erstelle ein Spiel, der Invite-Link nutzt diese URL (nicht localhost, sofern `VITE_PUBLIC_APP_URL` gesetzt ist).
 
