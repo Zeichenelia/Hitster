@@ -35,6 +35,7 @@
   let gameState = "lobby";
   let activeTeamId = "";
   let currentCard = null;
+  let playerCard = null;
   let remainingCards = 0;
   let lastRevealedCard = null;
   let lastRevealCorrect = true;
@@ -91,7 +92,8 @@
     if (!card) {
       return null;
     }
-    const avatarUrl = card.playlistAvatarUrl || "";
+    const fallbackAvatarPath = card.packId ? `/pack-logo/${encodeURIComponent(card.packId)}` : "";
+    const avatarUrl = card.playlistAvatarUrl || fallbackAvatarPath;
     return {
       ...card,
       playlistAvatarUrl: avatarUrl.startsWith("/") ? `${apiBaseUrl}${avatarUrl}` : avatarUrl,
@@ -196,6 +198,9 @@
     view = "lobby";
     activeTeamId = payload.activeTeamId || "";
     currentCard = normalizeCard(payload.currentCard);
+    if (payload.currentCard) {
+      playerCard = normalizeCard(payload.currentCard);
+    }
     if (payload.currentCard?.url) {
       audioUrl = payload.currentCard.url;
     } else if (payload.state && payload.state !== "playing") {
@@ -222,6 +227,7 @@
     gameState = "playing";
     activeTeamId = payload.activeTeamId || "";
     currentCard = null;
+    playerCard = null;
     audioUrl = "";
     remainingCards = payload.remainingCards ?? 0;
     lastRevealedCard = null;
@@ -247,6 +253,7 @@
   socket.on("game:next-turn", (payload) => {
     activeTeamId = payload.activeTeamId || "";
     currentCard = normalizeCard(payload.card);
+    playerCard = normalizeCard(payload.card);
     audioUrl = payload.card?.url || "";
     remainingCards = payload.remainingCards ?? remainingCards;
     pendingPlacement = null;
@@ -263,6 +270,7 @@
     activeTeamId = payload.activeTeamId || activeTeamId;
     remainingCards = payload.remainingCards ?? remainingCards;
     currentCard = null;
+    playerCard = normalizeCard(payload.card);
     audioUrl = payload.card?.url || "";
     lastRevealCorrect = Boolean(payload.correct);
     lastRevealedCard = payload.correct ? null : payload.card || null;
@@ -563,6 +571,7 @@
       {gameState}
       {activeTeamId}
       {currentCard}
+      {playerCard}
       {audioUrl}
       {lastPlacedCardId}
       {lastPlacedTeamId}
@@ -854,8 +863,8 @@
 
 
   :global(.music-player-card) {
-    width: min(260px, calc(100vw - 24px));
-    margin-inline: auto;
+    width: min(220px, calc(100vw - 24px));
+    justify-self: start;
     background: #ffffff;
     color: #101010;
     border-radius: 18px;
@@ -863,14 +872,6 @@
     box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
     display: grid;
     gap: 10px;
-  }
-
-
-  :global(.music-player-card-fixed) {
-    position: fixed;
-    top: clamp(28px, 4vh, 120px);
-    left: clamp(12px, 2vw, 24px);
-    z-index: 8;
   }
 
   :global(.music-player-avatar) {
@@ -902,43 +903,47 @@
   }
 
   :global(.music-control-btn) {
-    position: relative;
-    width: 42px;
-    height: 42px;
+    width: 40px;
+    height: 40px;
     border: 0;
     border-radius: 999px;
-    display: grid;
-    place-items: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
     cursor: pointer;
     background: #e5e7eb;
     color: #111827;
+    line-height: 1;
+    padding: 0;
   }
 
   :global(.music-control-btn svg) {
-    width: 22px;
-    height: 22px;
+    width: 18px;
+    height: 18px;
     fill: currentColor;
+    display: block;
   }
 
-  :global(.music-control-btn-seek .music-control-seconds) {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
+  :global(.music-control-btn span) {
     font-size: 0.58rem;
     font-weight: 700;
-    pointer-events: none;
   }
 
   :global(.music-control-btn-main) {
-    width: 52px;
-    height: 52px;
+    width: 50px;
+    height: 50px;
     background: #d1d5db;
   }
 
   :global(.music-control-btn-main svg) {
-    width: 26px;
-    height: 26px;
+    width: 24px;
+    height: 24px;
+  }
+
+  :global(.music-control-btn-main span) {
+    display: none;
   }
 
   :global(.music-progress-track) {

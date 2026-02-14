@@ -583,7 +583,7 @@ io.on("connection", (socket) => {
 
       io.to(roomCode).emit("game:card-revealed", {
         teamId: team.id,
-        card: revealedCard,
+        card: serializeCardForClient(revealedCard),
         correct: true,
         position: 0,
         activeTeamId: room.activeTeamId,
@@ -662,7 +662,7 @@ io.on("connection", (socket) => {
 
     io.to(roomCode).emit("game:card-revealed", {
       teamId: team.id,
-      card: revealedCard,
+      card: serializeCardForClient(revealedCard),
       correct,
       position: index,
       activeTeamId: room.activeTeamId,

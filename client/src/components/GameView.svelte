@@ -6,6 +6,7 @@
   export let gameState = "playing";
   export let activeTeamId = "";
   export let currentCard = null;
+  export let playerCard = null;
   export let audioUrl = "";
   export let lastPlacedCardId = "";
   export let lastPlacedTeamId = "";
@@ -222,7 +223,8 @@
     isPaused = false;
   }
 
-  $: if (currentCard?.id) {
+  $: displayCard = playerCard || currentCard;
+  $: if (displayCard?.id) {
     avatarLoadFailed = false;
   }
   $: embedUrl = currentVideoId ? buildEmbedUrl(currentVideoId, origin) : "";
@@ -481,20 +483,20 @@
   {/if}
 
 
-  {#if currentCard}
-    <div class="music-player-card music-player-card-fixed">
+  {#if displayCard}
+    <div class="music-player-card">
       <img
         class="music-player-avatar"
-        src={avatarLoadFailed ? logoSrc : (currentCard.playlistAvatarUrl || logoSrc)}
-        alt={currentCard.packName || "Playlist"}
+        src={avatarLoadFailed ? logoSrc : (displayCard.playlistAvatarUrl || logoSrc)}
+        alt={displayCard.packName || "Playlist"}
         on:error={() => { avatarLoadFailed = true; }}
       />
-      <h2 class="music-player-title">Card #{currentCard.cardNumber || "?"}</h2>
-      <p class="music-player-subtitle">{currentCard.packName || "Unknown Playlist"}</p>
+      <h2 class="music-player-title">Card #{displayCard.cardNumber || "?"}</h2>
+      <p class="music-player-subtitle">{displayCard.packName || "Unknown Playlist"}</p>
       <div class="music-player-controls">
-        <button class="music-control-btn music-control-btn-seek" type="button" aria-label="10 Sekunden zurück" on:click={() => seekRelative(-10)}>
+        <button class="music-control-btn" type="button" aria-label="10 Sekunden zurück" on:click={() => seekRelative(-10)}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2L7 6l5 4V7c3.3 0 6 2.7 6 6a6 6 0 0 1-6 6 6 6 0 0 1-5.7-4H4.2A8 8 0 0 0 12 21a8 8 0 0 0 0-16z"/></svg>
-          <span class="music-control-seconds">10</span>
+          <span>10</span>
         </button>
         <button class="music-control-btn music-control-btn-main" type="button" aria-label={isPaused ? "Wiedergabe" : "Pause"} on:click={togglePlayback}>
           {#if isPaused}
@@ -503,9 +505,9 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
           {/if}
         </button>
-        <button class="music-control-btn music-control-btn-seek" type="button" aria-label="10 Sekunden vor" on:click={() => seekRelative(10)}>
+        <button class="music-control-btn" type="button" aria-label="10 Sekunden vor" on:click={() => seekRelative(10)}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2l5 4-5 4V7a6 6 0 1 0 5.7 8h2.1A8 8 0 1 1 12 5z"/></svg>
-          <span class="music-control-seconds">10</span>
+          <span>10</span>
         </button>
       </div>
       <div class="music-progress-track" bind:this={seekTrackRef} role="slider" tabindex="0" aria-label="Song-Position" aria-valuemin="0" aria-valuemax={Math.max(0, Math.floor(playerDuration))} aria-valuenow={Math.max(0, Math.floor(playerCurrentTime))} on:pointerdown={handleSeekPointerDown} on:keydown={(event) => { if (event.key === "ArrowLeft") seekRelative(-10); if (event.key === "ArrowRight") seekRelative(10); }}>
