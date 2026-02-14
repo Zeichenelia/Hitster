@@ -894,19 +894,39 @@
   }
 
   :global(.music-control-btn) {
+    width: 44px;
+    height: 44px;
     border: 0;
     border-radius: 999px;
-    padding: 10px 14px;
-    font-size: 0.85rem;
-    font-weight: 700;
+    display: grid;
+    place-items: center;
+    gap: 2px;
     cursor: pointer;
     background: #e5e7eb;
     color: #111827;
+    font-weight: 700;
+  }
+
+  :global(.music-control-btn svg) {
+    width: 22px;
+    height: 22px;
+    fill: currentColor;
+  }
+
+  :global(.music-control-btn span) {
+    font-size: 0.62rem;
+    margin-top: -2px;
   }
 
   :global(.music-control-btn-main) {
+    width: 56px;
+    height: 56px;
     background: #d1d5db;
-    min-width: 76px;
+  }
+
+  :global(.music-control-btn-main svg) {
+    width: 28px;
+    height: 28px;
   }
 
   :global(.music-progress-track) {
@@ -915,6 +935,12 @@
     border-radius: 999px;
     background: #e5e7eb;
     overflow: hidden;
+    cursor: pointer;
+  }
+
+  :global(.music-progress-track:focus-visible) {
+    outline: 2px solid rgba(20, 184, 166, 0.45);
+    outline-offset: 3px;
   }
 
   :global(.music-progress-fill) {
@@ -928,6 +954,10 @@
     justify-content: space-between;
     font-size: 0.8rem;
     color: #4b5563;
+  }
+
+  :global(.music-control-btn:hover) {
+    background: #d1d5db;
   }
 
   :global(.audio-panel) {

@@ -84,7 +84,7 @@ function loadDeckFromPacks(packIds) {
     for (const row of records) {
       const parsedYear = Number.parseInt(row["Year"], 10);
       const year = Number.isNaN(parsedYear) ? row["Year"] : parsedYear;
-      const cardNumber = row["Card#"] || "";
+      const cardNumber = row["Card#"] || row["﻿Card#"] || "";
       cards.push({
         id: `${packId}-${cardNumber || cards.length + 1}`,
         packId,
