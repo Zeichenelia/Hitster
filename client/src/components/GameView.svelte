@@ -39,6 +39,12 @@
   let showVolume = false;
   let volumeTrackRef;
   let volumeDockRef;
+  let playerCurrentTime = 0;
+  let playerDuration = 0;
+  let isPaused = false;
+  let seekTrackRef;
+  let avatarLoadFailed = false;
+  let playerPollTimer;
 
   const autoScrollX = (node) => {
     let frame;
@@ -174,6 +180,7 @@
       return;
     }
     sendPlayerCommand("playVideo");
+    isPaused = false;
   };
 
   const updateVolumeFromClientY = (clientY) => {
@@ -210,11 +217,113 @@
   $: if (currentVideoId !== lastVideoId) {
     lastVideoId = currentVideoId;
     playerReady = false;
+    playerCurrentTime = 0;
+    playerDuration = 0;
+    isPaused = false;
+  }
+
+  $: if (currentCard?.id) {
+    avatarLoadFailed = false;
   }
   $: embedUrl = currentVideoId ? buildEmbedUrl(currentVideoId, origin) : "";
   $: if (currentVideoId && playerReady) {
     syncVolume();
   }
+
+
+  const seekRelative = (seconds) => {
+    if (!playerReady) {
+      return;
+    }
+    const nextTime = Math.max(0, Math.min(playerDuration || Infinity, playerCurrentTime + seconds));
+    sendPlayerCommand("seekTo", [nextTime, true]);
+    playerCurrentTime = nextTime;
+  };
+
+  const togglePlayback = () => {
+    if (!playerReady || !currentVideoId) {
+      return;
+    }
+    if (isPaused) {
+      sendPlayerCommand("playVideo");
+      isPaused = false;
+      return;
+    }
+    sendPlayerCommand("pauseVideo");
+    isPaused = true;
+  };
+
+  const syncPlaybackProgress = () => {
+    if (!playerReady) {
+      return;
+    }
+    sendPlayerCommand("getCurrentTime");
+    sendPlayerCommand("getDuration");
+    sendPlayerCommand("getPlayerState");
+  };
+
+  const seekToRatio = (ratio) => {
+    if (!playerReady || !Number.isFinite(playerDuration) || playerDuration <= 0) {
+      return;
+    }
+    const nextTime = Math.max(0, Math.min(playerDuration, ratio * playerDuration));
+    sendPlayerCommand("seekTo", [nextTime, true]);
+    playerCurrentTime = nextTime;
+  };
+
+  const handleSeekPointerDown = (event) => {
+    if (!seekTrackRef) {
+      return;
+    }
+    const updateFromClientX = (clientX) => {
+      const rect = seekTrackRef.getBoundingClientRect();
+      const ratio = (clientX - rect.left) / rect.width;
+      seekToRatio(Math.max(0, Math.min(1, ratio)));
+    };
+    updateFromClientX(event.clientX);
+    const handleMove = (moveEvent) => updateFromClientX(moveEvent.clientX);
+    const handleUp = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp, { once: true });
+  };
+
+  const formatTime = (seconds) => {
+    const safe = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+    const mins = Math.floor(safe / 60);
+    const secs = String(safe % 60).padStart(2, "0");
+    return `${mins}:${secs}`;
+  };
+
+  const handlePlayerMessage = (event) => {
+    if (event.origin !== "https://www.youtube.com") {
+      return;
+    }
+    if (typeof event.data !== "string") {
+      return;
+    }
+    let payload;
+    try {
+      payload = JSON.parse(event.data);
+    } catch (error) {
+      return;
+    }
+    if (payload?.event !== "infoDelivery") {
+      return;
+    }
+    const info = payload.info || {};
+    if (Number.isFinite(info.currentTime)) {
+      playerCurrentTime = info.currentTime;
+    }
+    if (Number.isFinite(info.duration) && info.duration > 0) {
+      playerDuration = info.duration;
+    }
+    if (Number.isInteger(info.playerState)) {
+      isPaused = info.playerState !== 1;
+    }
+  };
 
   const handleDocumentClick = (event) => {
     if (!showVolume || !volumeDockRef) {
@@ -230,15 +339,21 @@
     if (typeof window !== "undefined") {
       origin = window.location.origin;
       window.addEventListener("click", handleDocumentClick);
+      window.addEventListener("message", handlePlayerMessage);
       const handleFirstInteract = () => {
         attemptPlay();
         window.removeEventListener("pointerdown", handleFirstInteract);
       };
       window.addEventListener("pointerdown", handleFirstInteract, { once: true });
+      playerPollTimer = window.setInterval(syncPlaybackProgress, 500);
     }
     return () => {
       if (typeof window !== "undefined") {
         window.removeEventListener("click", handleDocumentClick);
+        window.removeEventListener("message", handlePlayerMessage);
+        if (playerPollTimer) {
+          window.clearInterval(playerPollTimer);
+        }
       }
     };
   });
@@ -357,9 +472,49 @@
             playerReady = true;
             syncVolume();
             attemptPlay();
+            playerRef?.contentWindow?.postMessage(JSON.stringify({ event: "listening" }), "*");
+            syncPlaybackProgress();
           }}
-        />
+        ></iframe>
       {/key}
+    </div>
+  {/if}
+
+
+  {#if currentCard}
+    <div class="music-player-card">
+      <img
+        class="music-player-avatar"
+        src={avatarLoadFailed ? logoSrc : (currentCard.playlistAvatarUrl || logoSrc)}
+        alt={currentCard.packName || "Playlist"}
+        on:error={() => { avatarLoadFailed = true; }}
+      />
+      <h2 class="music-player-title">Card #{currentCard.cardNumber || "?"}</h2>
+      <p class="music-player-subtitle">{currentCard.packName || "Unknown Playlist"}</p>
+      <div class="music-player-controls">
+        <button class="music-control-btn" type="button" aria-label="10 Sekunden zurück" on:click={() => seekRelative(-10)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 6.2v2.6L7.8 6.4 6.5 8l4.5 3.8L6.5 15.6l1.3 1.6 3.2-2.4V17h2v-4.2h.1a4.8 4.8 0 1 1 0-9.6h.4v-2h-.4a6.8 6.8 0 0 0-2.1 13.3V17h2V6.2h-2z"/></svg>
+          <span>10</span>
+        </button>
+        <button class="music-control-btn music-control-btn-main" type="button" aria-label={isPaused ? "Wiedergabe" : "Pause"} on:click={togglePlayback}>
+          {#if isPaused}
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+          {:else}
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
+          {/if}
+        </button>
+        <button class="music-control-btn" type="button" aria-label="10 Sekunden vor" on:click={() => seekRelative(10)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 6.2h-2v10.9a6.8 6.8 0 0 1-2.1-13.3h.4v2h-.4a4.8 4.8 0 1 0 0 9.6H9V14.8l3.2 2.4 1.3-1.6-4.5-3.8L13.5 8l-1.3-1.6L9 8.8V6.2h4z"/></svg>
+          <span>10</span>
+        </button>
+      </div>
+      <div class="music-progress-track" bind:this={seekTrackRef} role="slider" tabindex="0" aria-label="Song-Position" aria-valuemin="0" aria-valuemax={Math.max(0, Math.floor(playerDuration))} aria-valuenow={Math.max(0, Math.floor(playerCurrentTime))} on:pointerdown={handleSeekPointerDown} on:keydown={(event) => { if (event.key === "ArrowLeft") seekRelative(-10); if (event.key === "ArrowRight") seekRelative(10); }}>
+        <div class="music-progress-fill" style={`width: ${playerDuration > 0 ? (playerCurrentTime / playerDuration) * 100 : 0}%`}></div>
+      </div>
+      <div class="music-time-row">
+        <span>{formatTime(playerCurrentTime)}</span>
+        <span>{formatTime(playerDuration)}</span>
+      </div>
     </div>
   {/if}
   {#if currentCard}
