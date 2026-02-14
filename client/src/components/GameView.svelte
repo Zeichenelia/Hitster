@@ -39,6 +39,9 @@
   let showVolume = false;
   let volumeTrackRef;
   let volumeDockRef;
+  let playerCurrentTime = 0;
+  let playerDuration = 0;
+  let isPaused = false;
 
   const autoScrollX = (node) => {
     let frame;
@@ -174,6 +177,7 @@
       return;
     }
     sendPlayerCommand("playVideo");
+    isPaused = false;
   };
 
   const updateVolumeFromClientY = (clientY) => {
@@ -210,11 +214,69 @@
   $: if (currentVideoId !== lastVideoId) {
     lastVideoId = currentVideoId;
     playerReady = false;
+    playerCurrentTime = 0;
+    playerDuration = 0;
+    isPaused = false;
   }
   $: embedUrl = currentVideoId ? buildEmbedUrl(currentVideoId, origin) : "";
   $: if (currentVideoId && playerReady) {
     syncVolume();
   }
+
+
+  const seekRelative = (seconds) => {
+    if (!playerReady) {
+      return;
+    }
+    const nextTime = Math.max(0, Math.min(playerDuration || Infinity, playerCurrentTime + seconds));
+    sendPlayerCommand("seekTo", [nextTime, true]);
+    playerCurrentTime = nextTime;
+  };
+
+  const togglePlayback = () => {
+    if (!playerReady || !currentVideoId) {
+      return;
+    }
+    if (isPaused) {
+      sendPlayerCommand("playVideo");
+      isPaused = false;
+      return;
+    }
+    sendPlayerCommand("pauseVideo");
+    isPaused = true;
+  };
+
+  const formatTime = (seconds) => {
+    const safe = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+    const mins = Math.floor(safe / 60);
+    const secs = String(safe % 60).padStart(2, "0");
+    return `${mins}:${secs}`;
+  };
+
+  const handlePlayerMessage = (event) => {
+    if (event.origin !== "https://www.youtube.com") {
+      return;
+    }
+    if (typeof event.data !== "string") {
+      return;
+    }
+    let payload;
+    try {
+      payload = JSON.parse(event.data);
+    } catch (error) {
+      return;
+    }
+    if (payload?.event !== "infoDelivery") {
+      return;
+    }
+    const info = payload.info || {};
+    if (Number.isFinite(info.currentTime)) {
+      playerCurrentTime = info.currentTime;
+    }
+    if (Number.isFinite(info.duration) && info.duration > 0) {
+      playerDuration = info.duration;
+    }
+  };
 
   const handleDocumentClick = (event) => {
     if (!showVolume || !volumeDockRef) {
@@ -230,6 +292,7 @@
     if (typeof window !== "undefined") {
       origin = window.location.origin;
       window.addEventListener("click", handleDocumentClick);
+      window.addEventListener("message", handlePlayerMessage);
       const handleFirstInteract = () => {
         attemptPlay();
         window.removeEventListener("pointerdown", handleFirstInteract);
@@ -239,6 +302,7 @@
     return () => {
       if (typeof window !== "undefined") {
         window.removeEventListener("click", handleDocumentClick);
+        window.removeEventListener("message", handlePlayerMessage);
       }
     };
   });
@@ -358,8 +422,39 @@
             syncVolume();
             attemptPlay();
           }}
-        />
+        ></iframe>
       {/key}
+    </div>
+  {/if}
+
+
+  {#if currentCard}
+    <div class="music-player-card">
+      <img
+        class="music-player-avatar"
+        src={currentCard.playlistAvatarUrl || logoSrc}
+        alt={currentCard.packName || "Playlist"}
+      />
+      <h2 class="music-player-title">Card #{currentCard.cardNumber || "?"}</h2>
+      <p class="music-player-subtitle">{currentCard.packName || "Unknown Playlist"}</p>
+      <div class="music-player-controls">
+        <button class="music-control-btn" type="button" aria-label="10 Sekunden zurück" on:click={() => seekRelative(-10)}>
+          -10s
+        </button>
+        <button class="music-control-btn music-control-btn-main" type="button" aria-label={isPaused ? "Wiedergabe" : "Pause"} on:click={togglePlayback}>
+          {isPaused ? "Play" : "Pause"}
+        </button>
+        <button class="music-control-btn" type="button" aria-label="10 Sekunden vor" on:click={() => seekRelative(10)}>
+          +10s
+        </button>
+      </div>
+      <div class="music-progress-track">
+        <div class="music-progress-fill" style={`width: ${playerDuration > 0 ? (playerCurrentTime / playerDuration) * 100 : 0}%`}></div>
+      </div>
+      <div class="music-time-row">
+        <span>{formatTime(playerCurrentTime)}</span>
+        <span>{formatTime(playerDuration)}</span>
+      </div>
     </div>
   {/if}
   {#if currentCard}
