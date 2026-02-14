@@ -6,6 +6,7 @@
   export let gameState = "playing";
   export let activeTeamId = "";
   export let currentCard = null;
+  export let playerCard = null;
   export let audioUrl = "";
   export let lastPlacedCardId = "";
   export let lastPlacedTeamId = "";
@@ -39,6 +40,14 @@
   let showVolume = false;
   let volumeTrackRef;
   let volumeDockRef;
+  let playerCurrentTime = 0;
+  let playerDuration = 0;
+  let isPaused = false;
+  let seekTrackRef;
+  let avatarLoadFailed = false;
+  let avatarCandidates = [];
+  let avatarIndex = 0;
+  let playerPollTimer;
 
   const autoScrollX = (node) => {
     let frame;
@@ -174,6 +183,7 @@
       return;
     }
     sendPlayerCommand("playVideo");
+    isPaused = false;
   };
 
   const updateVolumeFromClientY = (clientY) => {
@@ -210,11 +220,130 @@
   $: if (currentVideoId !== lastVideoId) {
     lastVideoId = currentVideoId;
     playerReady = false;
+    playerCurrentTime = 0;
+    playerDuration = 0;
+    isPaused = false;
   }
+
+  $: displayCard = playerCard || currentCard;
+  $: if (displayCard?.id) {
+    avatarCandidates = buildAvatarCandidates(displayCard);
+    avatarIndex = 0;
+    avatarLoadFailed = false;
+  }
+  $: currentAvatarSrc = avatarCandidates[avatarIndex] || logoSrc;
   $: embedUrl = currentVideoId ? buildEmbedUrl(currentVideoId, origin) : "";
   $: if (currentVideoId && playerReady) {
     syncVolume();
   }
+
+
+  const seekRelative = (seconds) => {
+    if (!playerReady) {
+      return;
+    }
+    const nextTime = Math.max(0, Math.min(playerDuration || Infinity, playerCurrentTime + seconds));
+    sendPlayerCommand("seekTo", [nextTime, true]);
+    playerCurrentTime = nextTime;
+  };
+
+  const togglePlayback = () => {
+    if (!playerReady || !currentVideoId) {
+      return;
+    }
+    if (isPaused) {
+      sendPlayerCommand("playVideo");
+      isPaused = false;
+      return;
+    }
+    sendPlayerCommand("pauseVideo");
+    isPaused = true;
+  };
+
+  const syncPlaybackProgress = () => {
+    if (!playerReady) {
+      return;
+    }
+    sendPlayerCommand("getCurrentTime");
+    sendPlayerCommand("getDuration");
+    sendPlayerCommand("getPlayerState");
+  };
+
+  const seekToRatio = (ratio) => {
+    if (!playerReady || !Number.isFinite(playerDuration) || playerDuration <= 0) {
+      return;
+    }
+    const nextTime = Math.max(0, Math.min(playerDuration, ratio * playerDuration));
+    sendPlayerCommand("seekTo", [nextTime, true]);
+    playerCurrentTime = nextTime;
+  };
+
+  const handleSeekPointerDown = (event) => {
+    if (!seekTrackRef) {
+      return;
+    }
+    const updateFromClientX = (clientX) => {
+      const rect = seekTrackRef.getBoundingClientRect();
+      const ratio = (clientX - rect.left) / rect.width;
+      seekToRatio(Math.max(0, Math.min(1, ratio)));
+    };
+    updateFromClientX(event.clientX);
+    const handleMove = (moveEvent) => updateFromClientX(moveEvent.clientX);
+    const handleUp = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp, { once: true });
+  };
+
+  const formatTime = (seconds) => {
+    const safe = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+    const mins = Math.floor(safe / 60);
+    const secs = String(safe % 60).padStart(2, "0");
+    return `${mins}:${secs}`;
+  };
+
+
+  const buildAvatarCandidates = (card) => {
+    if (!card) {
+      return [];
+    }
+    const fallbackPath = card.packId ? `/pack-logo/${encodeURIComponent(card.packId)}` : "";
+    const values = [card.playlistAvatarUrl || "", fallbackPath];
+    if (fallbackPath && typeof window !== "undefined") {
+      values.push(`${window.location.origin}${fallbackPath}`);
+    }
+    return values.filter((value, index, all) => Boolean(value) && all.indexOf(value) === index);
+  };
+
+  const handlePlayerMessage = (event) => {
+    if (event.origin !== "https://www.youtube.com") {
+      return;
+    }
+    if (typeof event.data !== "string") {
+      return;
+    }
+    let payload;
+    try {
+      payload = JSON.parse(event.data);
+    } catch (error) {
+      return;
+    }
+    if (payload?.event !== "infoDelivery") {
+      return;
+    }
+    const info = payload.info || {};
+    if (Number.isFinite(info.currentTime)) {
+      playerCurrentTime = info.currentTime;
+    }
+    if (Number.isFinite(info.duration) && info.duration > 0) {
+      playerDuration = info.duration;
+    }
+    if (Number.isInteger(info.playerState)) {
+      isPaused = info.playerState !== 1;
+    }
+  };
 
   const handleDocumentClick = (event) => {
     if (!showVolume || !volumeDockRef) {
@@ -230,15 +359,21 @@
     if (typeof window !== "undefined") {
       origin = window.location.origin;
       window.addEventListener("click", handleDocumentClick);
+      window.addEventListener("message", handlePlayerMessage);
       const handleFirstInteract = () => {
         attemptPlay();
         window.removeEventListener("pointerdown", handleFirstInteract);
       };
       window.addEventListener("pointerdown", handleFirstInteract, { once: true });
+      playerPollTimer = window.setInterval(syncPlaybackProgress, 500);
     }
     return () => {
       if (typeof window !== "undefined") {
         window.removeEventListener("click", handleDocumentClick);
+        window.removeEventListener("message", handlePlayerMessage);
+        if (playerPollTimer) {
+          window.clearInterval(playerPollTimer);
+        }
       }
     };
   });
@@ -357,9 +492,55 @@
             playerReady = true;
             syncVolume();
             attemptPlay();
+            playerRef?.contentWindow?.postMessage(JSON.stringify({ event: "listening" }), "*");
+            syncPlaybackProgress();
           }}
-        />
+        ></iframe>
       {/key}
+    </div>
+  {/if}
+
+
+  {#if displayCard}
+    <div class="music-player-card">
+      <img
+        class="music-player-avatar"
+        src={avatarLoadFailed ? logoSrc : currentAvatarSrc}
+        alt={displayCard.packName || "Playlist"}
+        on:error={() => {
+          if (avatarIndex < avatarCandidates.length - 1) {
+            avatarIndex += 1;
+            return;
+          }
+          avatarLoadFailed = true;
+        }}
+      />
+      <h2 class="music-player-title">Card #{displayCard.cardNumber || "?"}</h2>
+      <p class="music-player-subtitle">{displayCard.packName || "Unknown Playlist"}</p>
+      <div class="music-player-controls">
+        <button class="music-control-btn" type="button" aria-label="10 Sekunden zurück" on:click={() => seekRelative(-10)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2L7 6l5 4V7c3.3 0 6 2.7 6 6a6 6 0 0 1-6 6 6 6 0 0 1-5.7-4H4.2A8 8 0 0 0 12 21a8 8 0 0 0 0-16z"/></svg>
+          <span class="music-seek-badge">10</span>
+        </button>
+        <button class="music-control-btn music-control-btn-main" type="button" aria-label={isPaused ? "Wiedergabe" : "Pause"} on:click={togglePlayback}>
+          {#if isPaused}
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+          {:else}
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
+          {/if}
+        </button>
+        <button class="music-control-btn" type="button" aria-label="10 Sekunden vor" on:click={() => seekRelative(10)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2l5 4-5 4V7a6 6 0 1 0 5.7 8h2.1A8 8 0 1 1 12 5z"/></svg>
+          <span class="music-seek-badge">10</span>
+        </button>
+      </div>
+      <div class="music-progress-track" bind:this={seekTrackRef} role="slider" tabindex="0" aria-label="Song-Position" aria-valuemin="0" aria-valuemax={Math.max(0, Math.floor(playerDuration))} aria-valuenow={Math.max(0, Math.floor(playerCurrentTime))} on:pointerdown={handleSeekPointerDown} on:keydown={(event) => { if (event.key === "ArrowLeft") seekRelative(-10); if (event.key === "ArrowRight") seekRelative(10); }}>
+        <div class="music-progress-fill" style={`width: ${playerDuration > 0 ? (playerCurrentTime / playerDuration) * 100 : 0}%`}></div>
+      </div>
+      <div class="music-time-row">
+        <span>{formatTime(playerCurrentTime)}</span>
+        <span>{formatTime(playerDuration)}</span>
+      </div>
     </div>
   {/if}
   {#if currentCard}
