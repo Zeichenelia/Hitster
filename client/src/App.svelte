@@ -7,7 +7,12 @@
   import WinnerScreen from "./components/WinnerScreen.svelte";
   import JoinModal from "./components/JoinModal.svelte";
 
-  const socket = io("http://localhost:3001");
+  const defaultApiBaseUrl =
+    typeof window !== "undefined" ? window.location.origin : "http://localhost:3001";
+  const apiBaseUrl = import.meta.env.VITE_API_URL || defaultApiBaseUrl;
+  // Always use the current window location for the invite link base
+  const getPublicAppBaseUrl = () => (typeof window !== "undefined" ? window.location.origin : defaultApiBaseUrl);
+  const socket = io(apiBaseUrl, { transports: ["websocket", "polling"] });
 
   let roomCode = "";
   let hostName = "Host";
@@ -49,6 +54,7 @@
   let clientId = "";
   let localPrefsReady = false;
   let pendingSync = false;
+  let stateVersion = -1;
 
   let teamCount = 2;
   let winTarget = 10;
@@ -131,7 +137,7 @@
     roomCode = payload.roomCode;
     isHost = true;
     view = "lobby";
-    inviteLink = `${baseUrl}?room=${roomCode}`;
+    inviteLink = `${getPublicAppBaseUrl()}?room=${roomCode}`;
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
       url.searchParams.set("room", roomCode);
@@ -166,6 +172,11 @@
   });
 
   socket.on("room:state", (payload) => {
+    const nextVersion = Number.isInteger(payload.version) ? payload.version : 0;
+    if (nextVersion < stateVersion) {
+      return;
+    }
+    stateVersion = nextVersion;
     rules = payload.rules || rules;
     players = payload.players || players;
     teams = payload.teams || teams;
@@ -173,16 +184,13 @@
     view = "lobby";
     activeTeamId = payload.activeTeamId || "";
     currentCard = payload.currentCard || null;
-    audioUrl = payload.currentCard?.url || "";
+    if (payload.currentCard?.url) {
+      audioUrl = payload.currentCard.url;
+    } else if (payload.state && payload.state !== "playing") {
+      audioUrl = "";
+    }
     remainingCards = payload.remainingCards ?? remainingCards;
     pendingPlacement = payload.pendingPlacement || null;
-    lastRevealedCard = null;
-    lastRevealCorrect = true;
-    lastRevealPosition = -1;
-    lastRevealTeamId = "";
-    lastPlacedCardId = "";
-    lastPlacedTeamId = "";
-    autoPlacedCardId = "";
     const statePlayers = payload.players || players;
     const currentPlayer = getPlayerByClientId(statePlayers) || statePlayers.find((player) => player.id === socketId);
     if (currentPlayer?.name && currentPlayer.name !== joinName) {
@@ -202,7 +210,15 @@
     gameState = "playing";
     activeTeamId = payload.activeTeamId || "";
     currentCard = null;
+    audioUrl = "";
     remainingCards = payload.remainingCards ?? 0;
+    lastRevealedCard = null;
+    lastRevealCorrect = true;
+    lastRevealPosition = -1;
+    lastRevealTeamId = "";
+    lastPlacedCardId = "";
+    lastPlacedTeamId = "";
+    autoPlacedCardId = "";
     winnerTeamId = "";
     showWinner = false;
     if (winnerTimer) {
@@ -221,13 +237,6 @@
     currentCard = payload.card || null;
     audioUrl = payload.card?.url || "";
     remainingCards = payload.remainingCards ?? remainingCards;
-    lastRevealedCard = null;
-    lastRevealCorrect = true;
-    lastRevealPosition = -1;
-    lastRevealTeamId = "";
-    lastPlacedCardId = "";
-    lastPlacedTeamId = "";
-    autoPlacedCardId = "";
     pendingPlacement = null;
   });
 
@@ -312,7 +321,7 @@
     if (roomFromUrl) {
       roomCode = roomFromUrl.toUpperCase();
       view = "lobby";
-      inviteLink = `${baseUrl}?room=${roomCode}`;
+      inviteLink = `${getPublicAppBaseUrl()}?room=${roomCode}`;
       if (socket.connected) {
         emitRoomSync();
       }
@@ -322,7 +331,7 @@
       pendingSync = false;
     }
     try {
-      const response = await fetch("http://localhost:3001/packs");
+      const response = await fetch(`${apiBaseUrl}/packs`);
       if (!response.ok) {
         throw new Error(`packs fetch failed: ${response.status}`);
       }
@@ -433,13 +442,6 @@
       teamId: activeTeamId,
       position,
     });
-    const activeTeam = teams.find((team) => team.id === activeTeamId);
-    if (activeTeam && (activeTeam.timeline || []).length > 0) {
-      pendingPlacement = {
-        teamId: activeTeamId,
-        position,
-      };
-    }
   }
 
   function revealCard() {

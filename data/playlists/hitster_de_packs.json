@@ -2,27 +2,32 @@
   {
     "id": "hitster-de",
     "name": "Hitster",
-    "file": "data/playlists/hitster-de.csv"
+    "file": "data/playlists/hitster-de.csv",
+    "logo": "data/playlists/pics/playlists_avatar/Avatar 1 – Hitster.png"
   },
   {
     "id": "hitster-de-aaaa0007",
     "name": "Hitster Schlagerparty",
-    "file": "data/playlists/hitster-de-aaaa0007.csv"
+    "file": "data/playlists/hitster-de-aaaa0007.csv",
+    "logo": "data/playlists/pics/playlists_avatar/Avatar 2 – Hitster Schlagerparty.png"
   },
   {
     "id": "hitster-de-aaaa0012",
     "name": "Hitster Summer Party",
-    "file": "data/playlists/hitster-de-aaaa0012.csv"
+    "file": "data/playlists/hitster-de-aaaa0012.csv",
+    "logo": "data/playlists/pics/playlists_avatar/Avatar 3 – Hitster Summer Party.png"
   },
   {
     "id": "hitster-de-aaaa0015",
     "name": "Hitster Guilty Pleasures",
-    "file": "data/playlists/hitster-de-aaaa0015.csv"
+    "file": "data/playlists/hitster-de-aaaa0015.csv",
+    "logo": "data/playlists/pics/playlists_avatar/Avatar 4 – Hitster Guilty Pleasures.png"
   },
   {
     "id": "hitster-de-aaaa0019",
     "name": "Hitster Bingo",
-    "file": "data/playlists/hitster-de-aaaa0019.csv"
+    "file": "data/playlists/hitster-de-aaaa0019.csv",
+    "logo": "data/playlists/pics/playlists_avatar/Avatar 5 – Hitster Bingo.png"
   },
   {
     "id": "hitster-de-aaaa0025",
@@ -32,16 +37,19 @@
   {
     "id": "hitster-de-aaaa0026",
     "name": "Hitster Movies & TV Soundtracks",
-    "file": "data/playlists/hitster-de-aaaa0026.csv"
+    "file": "data/playlists/hitster-de-aaaa0026.csv",
+    "logo": "data/playlists/pics/playlists_avatar/Avatar 7 – Hitster Movies & TV Soundtracks.png"
   },
   {
     "id": "hitster-de-aaaa0039",
     "name": "Hitster Rock",
-    "file": "data/playlists/hitster-de-aaaa0039.csv"
+    "file": "data/playlists/hitster-de-aaaa0039.csv",
+    "logo": "data/playlists/pics/playlists_avatar/Avatar 8 – Hitster Rock.png"
   },
   {
     "id": "hitster-de-aaaa0040",
     "name": "Hitster Celebration",
-    "file": "data/playlists/hitster-de-aaaa0040.csv"
+    "file": "data/playlists/hitster-de-aaaa0040.csv",
+    "logo": "data/playlists/pics/playlists_avatar/Avatar 9 – Hitster Celebration.png"
   }
 ]

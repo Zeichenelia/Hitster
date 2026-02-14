@@ -79,6 +79,7 @@ function loadDeckFromPacks(packIds) {
 
 function serializeRoomState(room) {
   return {
+    version: room.version,
     state: room.state,
     rules: room.rules,
     players: Array.from(room.players.values()),
@@ -88,6 +89,11 @@ function serializeRoomState(room) {
     remainingCards: room.deck.length,
     pendingPlacement: room.pendingPlacement || null,
   };
+}
+
+function broadcastRoomState(roomCode, room) {
+  room.version += 1;
+  io.to(roomCode).emit("room:state", serializeRoomState(room));
 }
 
 function sortTeamIds(teamIds) {
@@ -188,6 +194,7 @@ function createRoom(code, hostId, hostName) {
         roundResults: new Map(),
         suddenDeathTeams: [],
         isSuddenDeath: false,
+        version: 0,
     };
 }
 
@@ -262,6 +269,7 @@ io.on("connection", (socket) => {
     io.to(code).emit("room:rules", { rules: room.rules });
     io.to(code).emit("room:teams", { teams: Array.from(room.teams.values()) });
     io.to(code).emit("room:players", { players: Array.from(room.players.values()) });
+    broadcastRoomState(code, room);
   });
 
   socket.on("room:join", ({ roomCode, playerName, clientId } = {}) => {
@@ -287,6 +295,7 @@ io.on("connection", (socket) => {
     io.to(roomCode).emit("room:players", {
       players: Array.from(room.players.values()),
     });
+    broadcastRoomState(roomCode, room);
   });
 
   socket.on("room:sync", ({ roomCode, clientId, playerName } = {}) => {
@@ -316,6 +325,7 @@ io.on("connection", (socket) => {
       io.to(roomCode).emit("room:players", {
         players: Array.from(room.players.values()),
       });
+      broadcastRoomState(roomCode, room);
     }
   });
 
@@ -347,6 +357,7 @@ io.on("connection", (socket) => {
     io.to(roomCode).emit("room:players", {
       players: Array.from(room.players.values()),
     });
+    broadcastRoomState(roomCode, room);
   });
 
   socket.on("rules:update", ({ roomCode, rules } = {}) => {
@@ -367,6 +378,7 @@ io.on("connection", (socket) => {
     io.to(roomCode).emit("room:players", {
       players: Array.from(room.players.values()),
     });
+    broadcastRoomState(roomCode, room);
   });
 
   socket.on("room:leave", ({ roomCode } = {}) => {
@@ -449,7 +461,7 @@ io.on("connection", (socket) => {
         turnOrder: room.turnOrder,
         remainingCards: room.deck.length,
     });
-    io.to(roomCode).emit("room:state", serializeRoomState(room));
+    broadcastRoomState(roomCode, room);
   });
 
   socket.on("game:next-turn", ({ roomCode } = {}) => {
@@ -497,8 +509,10 @@ io.on("connection", (socket) => {
         card: { id: nextCard.id, url: nextCard.url || "" },
         remainingCards: room.deck.length,
       });
+      broadcastRoomState(roomCode, room);
     } else {
       io.to(roomCode).emit("game:deck-empty", { remainingCards: 0 });
+      broadcastRoomState(roomCode, room);
     }
   });
 
@@ -553,6 +567,7 @@ io.on("connection", (socket) => {
       });
       io.to(roomCode).emit("room:teams", { teams: Array.from(room.teams.values()) });
       advanceRound(room, roomCode);
+      broadcastRoomState(roomCode, room);
       return;
     }
 
@@ -562,6 +577,7 @@ io.on("connection", (socket) => {
       teamId,
       position: index,
     });
+    broadcastRoomState(roomCode, room);
   });
 
   socket.on("game:reveal-card", ({ roomCode } = {}) => {
@@ -630,6 +646,7 @@ io.on("connection", (socket) => {
     });
     io.to(roomCode).emit("room:teams", { teams: Array.from(room.teams.values()) });
     advanceRound(room, roomCode);
+    broadcastRoomState(roomCode, room);
   });
 
   socket.on("game:score-update", ({ roomCode, teamId, card, correct } = {}) => {
@@ -672,6 +689,7 @@ io.on("connection", (socket) => {
     }
 
     io.to(roomCode).emit("game:round-ended", { isSuddenDeath: room.isSuddenDeath });
+    broadcastRoomState(roomCode, room);
   });
 
   socket.on("disconnect", () => {
@@ -685,6 +703,7 @@ io.on("connection", (socket) => {
         io.to(code).emit("room:players", {
           players: Array.from(room.players.values()),
         });
+        broadcastRoomState(code, room);
         break;
       }
       if (room.players.delete(socket.id)) {
@@ -694,6 +713,7 @@ io.on("connection", (socket) => {
           io.to(code).emit("room:players", {
             players: Array.from(room.players.values()),
           });
+          broadcastRoomState(code, room);
         }
         break;
       }
