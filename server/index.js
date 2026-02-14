@@ -60,6 +60,9 @@ function serializeCardForClient(card) {
     packName: pack?.name || "",
     cardNumber: card.cardNumber || "",
     playlistAvatarUrl: pack?.logo ? `/pack-logo/${encodeURIComponent(card.packId)}` : "",
+    title: card.title || "",
+    artist: card.artist || "",
+    year: card.year ?? "",
   };
 }
 
