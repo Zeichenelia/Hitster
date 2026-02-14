@@ -86,6 +86,18 @@
     return playerGlows[Math.abs(hash) % playerGlows.length];
   };
 
+
+  const normalizeCard = (card) => {
+    if (!card) {
+      return null;
+    }
+    const avatarUrl = card.playlistAvatarUrl || "";
+    return {
+      ...card,
+      playlistAvatarUrl: avatarUrl.startsWith("/") ? `${apiBaseUrl}${avatarUrl}` : avatarUrl,
+    };
+  };
+
   const getPlayerByClientId = (currentPlayers = players) =>
     currentPlayers.find((player) => player.clientId && player.clientId === clientId) || null;
 
@@ -183,7 +195,7 @@
     gameState = payload.state || gameState;
     view = "lobby";
     activeTeamId = payload.activeTeamId || "";
-    currentCard = payload.currentCard || null;
+    currentCard = normalizeCard(payload.currentCard);
     if (payload.currentCard?.url) {
       audioUrl = payload.currentCard.url;
     } else if (payload.state && payload.state !== "playing") {
@@ -234,7 +246,7 @@
 
   socket.on("game:next-turn", (payload) => {
     activeTeamId = payload.activeTeamId || "";
-    currentCard = payload.card || null;
+    currentCard = normalizeCard(payload.card);
     audioUrl = payload.card?.url || "";
     remainingCards = payload.remainingCards ?? remainingCards;
     pendingPlacement = null;
@@ -838,6 +850,126 @@
   :global(.game-frame) {
     display: grid;
     gap: clamp(16px, 2vw, 24px);
+  }
+
+
+  :global(.music-player-card) {
+    width: min(260px, calc(100vw - 24px));
+    margin-inline: auto;
+    background: #ffffff;
+    color: #101010;
+    border-radius: 18px;
+    padding: 18px;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+    display: grid;
+    gap: 10px;
+  }
+
+
+  :global(.music-player-card-fixed) {
+    position: fixed;
+    top: clamp(28px, 4vh, 120px);
+    left: clamp(12px, 2vw, 24px);
+    z-index: 8;
+  }
+
+  :global(.music-player-avatar) {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border-radius: 14px;
+  }
+
+  :global(.music-player-title) {
+    margin: 0;
+    text-align: center;
+    font-size: 1.05rem;
+    font-weight: 700;
+  }
+
+  :global(.music-player-subtitle) {
+    margin: 0;
+    text-align: center;
+    font-size: 0.9rem;
+    color: #4b5563;
+  }
+
+  :global(.music-player-controls) {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+  }
+
+  :global(.music-control-btn) {
+    position: relative;
+    width: 42px;
+    height: 42px;
+    border: 0;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    background: #e5e7eb;
+    color: #111827;
+  }
+
+  :global(.music-control-btn svg) {
+    width: 22px;
+    height: 22px;
+    fill: currentColor;
+  }
+
+  :global(.music-control-btn-seek .music-control-seconds) {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-size: 0.58rem;
+    font-weight: 700;
+    pointer-events: none;
+  }
+
+  :global(.music-control-btn-main) {
+    width: 52px;
+    height: 52px;
+    background: #d1d5db;
+  }
+
+  :global(.music-control-btn-main svg) {
+    width: 26px;
+    height: 26px;
+  }
+
+  :global(.music-progress-track) {
+    width: 100%;
+    height: 8px;
+    border-radius: 999px;
+    background: #e5e7eb;
+    overflow: hidden;
+    cursor: pointer;
+  }
+
+  :global(.music-progress-track:focus-visible) {
+    outline: 2px solid rgba(20, 184, 166, 0.45);
+    outline-offset: 3px;
+  }
+
+  :global(.music-progress-fill) {
+    height: 100%;
+    border-radius: 999px;
+    background: #14b8a6;
+  }
+
+  :global(.music-time-row) {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: #4b5563;
+  }
+
+  :global(.music-control-btn:hover) {
+    background: #d1d5db;
   }
 
   :global(.audio-panel) {
