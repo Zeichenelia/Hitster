@@ -733,7 +733,7 @@
 
   :global(.game-header) {
     display: grid;
-    gap: 10px;
+    gap: 8px;
   }
 
   :global(.game-actions) {
@@ -863,35 +863,38 @@
 
 
   :global(.music-player-card) {
-    width: min(220px, calc(100vw - 24px));
-    justify-self: start;
+    position: fixed;
+    top: 18px;
+    left: 10px;
+    z-index: 7;
+    width: var(--drawn-card-width);
     background: #ffffff;
     color: #101010;
-    border-radius: 18px;
-    padding: 18px;
-    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+    border-radius: 14px;
+    padding: 10px;
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.3);
     display: grid;
-    gap: 10px;
+    gap: 8px;
   }
 
   :global(.music-player-avatar) {
     width: 100%;
     aspect-ratio: 1 / 1;
     object-fit: cover;
-    border-radius: 14px;
+    border-radius: 10px;
   }
 
   :global(.music-player-title) {
     margin: 0;
     text-align: center;
-    font-size: 1.05rem;
+    font-size: 0.95rem;
     font-weight: 700;
   }
 
   :global(.music-player-subtitle) {
     margin: 0;
     text-align: center;
-    font-size: 0.9rem;
+    font-size: 0.78rem;
     color: #4b5563;
   }
 
@@ -903,52 +906,49 @@
   }
 
   :global(.music-control-btn) {
-    width: 40px;
-    height: 40px;
+    position: relative;
+    width: 34px;
+    height: 34px;
     border: 0;
     border-radius: 999px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 1px;
+    display: grid;
+    place-items: center;
     cursor: pointer;
     background: #e5e7eb;
     color: #111827;
-    line-height: 1;
     padding: 0;
   }
 
   :global(.music-control-btn svg) {
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
     fill: currentColor;
     display: block;
   }
 
-  :global(.music-control-btn span) {
-    font-size: 0.58rem;
+  :global(.music-seek-badge) {
+    position: absolute;
+    bottom: 3px;
+    font-size: 0.5rem;
     font-weight: 700;
+    line-height: 1;
+    pointer-events: none;
   }
 
   :global(.music-control-btn-main) {
-    width: 50px;
-    height: 50px;
+    width: 42px;
+    height: 42px;
     background: #d1d5db;
   }
 
   :global(.music-control-btn-main svg) {
-    width: 24px;
-    height: 24px;
-  }
-
-  :global(.music-control-btn-main span) {
-    display: none;
+    width: 20px;
+    height: 20px;
   }
 
   :global(.music-progress-track) {
     width: 100%;
-    height: 8px;
+    height: 6px;
     border-radius: 999px;
     background: #e5e7eb;
     overflow: hidden;
@@ -969,12 +969,23 @@
   :global(.music-time-row) {
     display: flex;
     justify-content: space-between;
-    font-size: 0.8rem;
+    font-size: 0.74rem;
     color: #4b5563;
   }
 
   :global(.music-control-btn:hover) {
     background: #d1d5db;
+  }
+
+
+  @media (max-width: 900px) {
+    :global(.music-player-card) {
+      top: 10px;
+      left: 8px;
+      width: min(170px, calc(100vw - 16px));
+      padding: 8px;
+      gap: 6px;
+    }
   }
 
   :global(.audio-panel) {

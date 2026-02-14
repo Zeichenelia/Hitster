@@ -45,6 +45,8 @@
   let isPaused = false;
   let seekTrackRef;
   let avatarLoadFailed = false;
+  let avatarCandidates = [];
+  let avatarIndex = 0;
   let playerPollTimer;
 
   const autoScrollX = (node) => {
@@ -225,8 +227,11 @@
 
   $: displayCard = playerCard || currentCard;
   $: if (displayCard?.id) {
+    avatarCandidates = buildAvatarCandidates(displayCard);
+    avatarIndex = 0;
     avatarLoadFailed = false;
   }
+  $: currentAvatarSrc = avatarCandidates[avatarIndex] || logoSrc;
   $: embedUrl = currentVideoId ? buildEmbedUrl(currentVideoId, origin) : "";
   $: if (currentVideoId && playerReady) {
     syncVolume();
@@ -297,6 +302,19 @@
     const mins = Math.floor(safe / 60);
     const secs = String(safe % 60).padStart(2, "0");
     return `${mins}:${secs}`;
+  };
+
+
+  const buildAvatarCandidates = (card) => {
+    if (!card) {
+      return [];
+    }
+    const fallbackPath = card.packId ? `/pack-logo/${encodeURIComponent(card.packId)}` : "";
+    const values = [card.playlistAvatarUrl || "", fallbackPath];
+    if (fallbackPath && typeof window !== "undefined") {
+      values.push(`${window.location.origin}${fallbackPath}`);
+    }
+    return values.filter((value, index, all) => Boolean(value) && all.indexOf(value) === index);
   };
 
   const handlePlayerMessage = (event) => {
@@ -487,16 +505,22 @@
     <div class="music-player-card">
       <img
         class="music-player-avatar"
-        src={avatarLoadFailed ? logoSrc : (displayCard.playlistAvatarUrl || logoSrc)}
+        src={avatarLoadFailed ? logoSrc : currentAvatarSrc}
         alt={displayCard.packName || "Playlist"}
-        on:error={() => { avatarLoadFailed = true; }}
+        on:error={() => {
+          if (avatarIndex < avatarCandidates.length - 1) {
+            avatarIndex += 1;
+            return;
+          }
+          avatarLoadFailed = true;
+        }}
       />
       <h2 class="music-player-title">Card #{displayCard.cardNumber || "?"}</h2>
       <p class="music-player-subtitle">{displayCard.packName || "Unknown Playlist"}</p>
       <div class="music-player-controls">
         <button class="music-control-btn" type="button" aria-label="10 Sekunden zurück" on:click={() => seekRelative(-10)}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2L7 6l5 4V7c3.3 0 6 2.7 6 6a6 6 0 0 1-6 6 6 6 0 0 1-5.7-4H4.2A8 8 0 0 0 12 21a8 8 0 0 0 0-16z"/></svg>
-          <span>10</span>
+          <span class="music-seek-badge">10</span>
         </button>
         <button class="music-control-btn music-control-btn-main" type="button" aria-label={isPaused ? "Wiedergabe" : "Pause"} on:click={togglePlayback}>
           {#if isPaused}
@@ -507,7 +531,7 @@
         </button>
         <button class="music-control-btn" type="button" aria-label="10 Sekunden vor" on:click={() => seekRelative(10)}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2l5 4-5 4V7a6 6 0 1 0 5.7 8h2.1A8 8 0 1 1 12 5z"/></svg>
-          <span>10</span>
+          <span class="music-seek-badge">10</span>
         </button>
       </div>
       <div class="music-progress-track" bind:this={seekTrackRef} role="slider" tabindex="0" aria-label="Song-Position" aria-valuemin="0" aria-valuemax={Math.max(0, Math.floor(playerDuration))} aria-valuenow={Math.max(0, Math.floor(playerCurrentTime))} on:pointerdown={handleSeekPointerDown} on:keydown={(event) => { if (event.key === "ArrowLeft") seekRelative(-10); if (event.key === "ArrowRight") seekRelative(10); }}>
