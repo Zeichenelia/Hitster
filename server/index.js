@@ -113,8 +113,27 @@ function serializeRoomState(room) {
     teams: Array.from(room.teams.values()),
     activeTeamId: room.activeTeamId,
     currentCard: serializeCardForClient(room.currentCard),
+    audioState: room.audioState || null,
     remainingCards: room.deck.length,
     pendingPlacement: room.pendingPlacement || null,
+  };
+}
+
+function getYouTubeId(url) {
+  if (!url) {
+    return "";
+  }
+  const match = String(url).match(/(?:youtu\.be\/|v=|\/embed\/)([\w-]{11})/u);
+  return match ? match[1] : "";
+}
+
+function createAudioState(card) {
+  const videoId = getYouTubeId(card?.url || "");
+  return {
+    videoId,
+    currentTime: 0,
+    isPaused: false,
+    updatedAt: Date.now(),
   };
 }
 
@@ -211,6 +230,7 @@ function createRoom(code, hostId, hostName) {
         deck: [],
         discard: [],
         currentCard: null,
+        audioState: null,
         pendingPlacement: null,
         pendingDiscard: null,
         activeTeamId: null,
@@ -356,6 +376,38 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("audio:sync", ({ roomCode, videoId, currentTime, isPaused } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room) {
+      socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
+      return;
+    }
+
+    const normalizedVideoId = typeof videoId === "string" ? videoId : "";
+    if (!normalizedVideoId) {
+      return;
+    }
+
+    const prevState = room.audioState || createAudioState(room.currentCard);
+    if (prevState.videoId && prevState.videoId !== normalizedVideoId) {
+      return;
+    }
+
+    const normalizedTime = Number.isFinite(Number(currentTime))
+      ? Math.max(0, Number(currentTime))
+      : prevState.currentTime || 0;
+
+    const nextAudioState = {
+      videoId: normalizedVideoId,
+      currentTime: normalizedTime,
+      isPaused: typeof isPaused === "boolean" ? isPaused : Boolean(prevState.isPaused),
+      updatedAt: Date.now(),
+    };
+
+    room.audioState = nextAudioState;
+    io.to(roomCode).emit("audio:state", nextAudioState);
+  });
+
   socket.on("team:join", ({ roomCode, teamId, playerName, clientId } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) return;
@@ -465,6 +517,7 @@ io.on("connection", (socket) => {
     room.deck = shuffleDeck(deck);
     room.discard = [];
     room.currentCard = null;
+    room.audioState = null;
     room.pendingDiscard = null;
 
     for (const team of room.teams.values()) {
@@ -531,10 +584,12 @@ io.on("connection", (socket) => {
     if (room.deck.length !== 0) {
       const nextCard = room.deck.pop();
       room.currentCard = nextCard;
+      room.audioState = createAudioState(nextCard);
       io.to(roomCode).emit("game:next-turn", {
         activeTeamId: room.activeTeamId,
         card: serializeCardForClient(nextCard),
         remainingCards: room.deck.length,
+        audioState: room.audioState,
       });
       broadcastRoomState(roomCode, room);
     } else {
@@ -580,6 +635,7 @@ io.on("connection", (socket) => {
       team.timeline = [room.currentCard];
       const revealedCard = room.currentCard;
       room.currentCard = null;
+      room.audioState = createAudioState(revealedCard);
       room.roundResults.set(team.id, true);
       room.turnIndex = (room.turnIndex + 1) % room.turnOrder.length;
       room.activeTeamId = room.turnOrder[room.turnIndex];
@@ -591,6 +647,7 @@ io.on("connection", (socket) => {
         position: 0,
         activeTeamId: room.activeTeamId,
         remainingCards: room.deck.length,
+        audioState: room.audioState,
       });
       io.to(roomCode).emit("room:teams", { teams: Array.from(room.teams.values()) });
       advanceRound(room, roomCode);
@@ -659,6 +716,7 @@ io.on("connection", (socket) => {
 
     const revealedCard = room.currentCard;
     room.currentCard = null;
+    room.audioState = createAudioState(revealedCard);
     room.pendingPlacement = null;
     room.turnIndex = (room.turnIndex + 1) % room.turnOrder.length;
     room.activeTeamId = room.turnOrder[room.turnIndex];
@@ -670,6 +728,7 @@ io.on("connection", (socket) => {
       position: index,
       activeTeamId: room.activeTeamId,
       remainingCards: room.deck.length,
+      audioState: room.audioState,
     });
     io.to(roomCode).emit("room:teams", { teams: Array.from(room.teams.values()) });
     advanceRound(room, roomCode);
@@ -706,6 +765,7 @@ io.on("connection", (socket) => {
       score: team.score,
       timelineLength: team.timeline.length,
       remainingCards: room.deck.length,
+      audioState: room.audioState,
     });
     io.to(roomCode).emit("room:teams", {
       teams: Array.from(room.teams.values()),
