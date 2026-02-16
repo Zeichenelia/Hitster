@@ -544,6 +544,56 @@ io.on("connection", (socket) => {
     broadcastRoomState(roomCode, room);
   });
 
+  socket.on("game:host-skip-song", ({ roomCode } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room) {
+      socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
+      return;
+    }
+
+    if (socket.id !== room.hostId) {
+      socket.emit("error", { code: "NOT_HOST", message: "Only the host can skip songs" });
+      return;
+    }
+
+    if (room.state !== "playing") {
+      socket.emit("error", { code: "GAME_NOT_STARTED", message: "Game has not started" });
+      return;
+    }
+
+    if (!room.currentCard) {
+      socket.emit("error", { code: "NO_CARD", message: "No card to skip" });
+      return;
+    }
+
+    if (room.pendingPlacement) {
+      socket.emit("error", { code: "PLACEMENT_PENDING", message: "Resolve placement before skipping" });
+      return;
+    }
+
+    room.discard.push(room.currentCard);
+
+    if (room.deck.length === 0) {
+      room.currentCard = null;
+      room.audioState = null;
+      io.to(roomCode).emit("game:deck-empty", { remainingCards: 0 });
+      broadcastRoomState(roomCode, room);
+      return;
+    }
+
+    const nextCard = room.deck.pop();
+    room.currentCard = nextCard;
+    room.audioState = createAudioState(nextCard);
+
+    io.to(roomCode).emit("game:host-song-skipped", {
+      activeTeamId: room.activeTeamId,
+      card: serializeCardForClient(nextCard),
+      remainingCards: room.deck.length,
+      audioState: room.audioState,
+    });
+    broadcastRoomState(roomCode, room);
+  });
+
   socket.on("game:next-turn", ({ roomCode } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) {

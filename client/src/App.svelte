@@ -263,6 +263,16 @@
     audioState = payload.audioState || null;
   });
 
+  socket.on("game:host-song-skipped", (payload) => {
+    activeTeamId = payload.activeTeamId || activeTeamId;
+    currentCard = normalizeCard(payload.card);
+    playerCard = normalizeCard(payload.card);
+    audioUrl = payload.card?.url || "";
+    remainingCards = payload.remainingCards ?? remainingCards;
+    pendingPlacement = null;
+    audioState = payload.audioState || null;
+  });
+
   socket.on("game:card-placed", (payload) => {
     pendingPlacement = {
       teamId: payload.teamId || "",
@@ -457,6 +467,18 @@
     socket.emit("game:next-turn", { roomCode });
   }
 
+  function hostSkipSong() {
+    if (!roomCode) {
+      lastError = "room code required";
+      return;
+    }
+    if (!isHost) {
+      lastError = "only host can use host menu";
+      return;
+    }
+    socket.emit("game:host-skip-song", { roomCode });
+  }
+
   function placeCard(position) {
     if (!roomCode) {
       lastError = "room code required";
@@ -610,6 +632,7 @@
       onRevealCard={revealCard}
       onJoinTeam={joinTeam}
       onAudioSync={syncAudioState}
+      onHostSkipSong={hostSkipSong}
     />
   {:else}
     <LobbyView

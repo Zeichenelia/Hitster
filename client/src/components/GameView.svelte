@@ -24,6 +24,7 @@
   export let onRevealCard = () => {};
   export let onJoinTeam = () => {};
   export let onAudioSync = () => {};
+  export let onHostSkipSong = () => {};
 
   const timelineSlots = 6;
   const logoSrc = "/assets/hitster-logo.png";
@@ -51,6 +52,7 @@
   let avatarIndex = 0;
   let playerPollTimer;
   let broadcastPollTimer;
+  let showHostMenu = false;
 
   const autoScrollX = (node) => {
     let frame;
@@ -271,6 +273,30 @@
   };
 
 
+  const hostTogglePauseAll = () => {
+    if (!isHost || !currentVideoId) {
+      return;
+    }
+    const nextPaused = !isPaused;
+    if (nextPaused) {
+      sendPlayerCommand("pauseVideo");
+    } else {
+      sendPlayerCommand("playVideo");
+    }
+    isPaused = nextPaused;
+    emitAudioSync({ isPaused: nextPaused });
+  };
+
+  const hostRestartSong = () => {
+    if (!isHost || !currentVideoId || !playerReady) {
+      return;
+    }
+    sendPlayerCommand("seekTo", [0, true]);
+    playerCurrentTime = 0;
+    isPaused = false;
+    emitAudioSync({ currentTime: 0, isPaused: false });
+  };
+
   const seekRelative = (seconds) => {
     if (!playerReady) {
       return;
@@ -383,13 +409,13 @@
   };
 
   const handleDocumentClick = (event) => {
-    if (!showVolume || !volumeDockRef) {
-      return;
+    if (showVolume && volumeDockRef && !volumeDockRef.contains(event.target)) {
+      showVolume = false;
     }
-    if (volumeDockRef.contains(event.target)) {
-      return;
+    const hostMenuNode = document.querySelector(".host-menu-shell");
+    if (showHostMenu && hostMenuNode && !hostMenuNode.contains(event.target)) {
+      showHostMenu = false;
     }
-    showVolume = false;
   };
 
   onMount(() => {
@@ -454,6 +480,29 @@
 </header>
 
 <section class="game-frame">
+  {#if isHost}
+    <div class="host-menu-shell">
+      {#if showHostMenu}
+        <div class="host-menu-panel">
+          <h3>Host Menü</h3>
+          <button type="button" on:click={onHostSkipSong}>Song für alle skippen</button>
+          <button type="button" on:click={hostRestartSong}>Song neu starten (0:00)</button>
+          <button type="button" on:click={hostTogglePauseAll}>{isPaused ? "Für alle fortsetzen" : "Für alle pausieren"}</button>
+        </div>
+      {/if}
+      <button
+        class="host-menu-toggle"
+        type="button"
+        aria-label="Host Menü öffnen"
+        aria-expanded={showHostMenu}
+        on:click|stopPropagation={() => {
+          showHostMenu = !showHostMenu;
+        }}
+      >
+        ⚙️
+      </button>
+    </div>
+  {/if}
   <div class="volume-dock" bind:this={volumeDockRef}>
     <button
       class="volume-toggle"
@@ -761,3 +810,59 @@
     </div>
   {/if}
 </section>
+
+
+<style>
+  .host-menu-shell {
+    position: fixed;
+    left: 18px;
+    bottom: 18px;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .host-menu-toggle {
+    width: 48px;
+    height: 48px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    background: rgba(20, 20, 30, 0.92);
+    color: #fff;
+    font-size: 22px;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  }
+
+  .host-menu-panel {
+    min-width: 220px;
+    background: rgba(17, 17, 24, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 14px;
+    padding: 10px;
+    display: grid;
+    gap: 8px;
+    box-shadow: 0 14px 24px rgba(0, 0, 0, 0.42);
+  }
+
+  .host-menu-panel h3 {
+    margin: 0 0 4px;
+    font-size: 14px;
+  }
+
+  .host-menu-panel button {
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    border-radius: 10px;
+    padding: 8px 10px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .host-menu-panel button:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+</style>
