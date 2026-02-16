@@ -479,6 +479,18 @@
     socket.emit("game:host-skip-song", { roomCode });
   }
 
+  function hostSoftReset() {
+    if (!roomCode) {
+      lastError = "room code required";
+      return;
+    }
+    if (!isHost) {
+      lastError = "only host can use host menu";
+      return;
+    }
+    socket.emit("game:host-soft-reset", { roomCode });
+  }
+
   function placeCard(position) {
     if (!roomCode) {
       lastError = "room code required";
@@ -633,6 +645,7 @@
       onJoinTeam={joinTeam}
       onAudioSync={syncAudioState}
       onHostSkipSong={hostSkipSong}
+      onHostSoftReset={hostSoftReset}
     />
   {:else}
     <LobbyView

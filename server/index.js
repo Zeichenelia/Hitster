@@ -544,6 +544,61 @@ io.on("connection", (socket) => {
     broadcastRoomState(roomCode, room);
   });
 
+  socket.on("game:host-soft-reset", ({ roomCode } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room) {
+      socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
+      return;
+    }
+
+    if (socket.id !== room.hostId) {
+      socket.emit("error", { code: "NOT_HOST", message: "Only the host can reset the game" });
+      return;
+    }
+
+    if (!Array.isArray(room.rules.packs) || room.rules.packs.length === 0) {
+      socket.emit("error", { code: "NO_PACKS", message: "Select at least one pack" });
+      return;
+    }
+
+    const deck = loadDeckFromPacks(room.rules.packs);
+    if (deck.length === 0) {
+      socket.emit("error", { code: "EMPTY_DECK", message: "No cards loaded from packs" });
+      return;
+    }
+
+    room.deck = shuffleDeck(deck);
+    room.discard = [];
+    room.currentCard = null;
+    room.pendingPlacement = null;
+    room.pendingDiscard = null;
+    room.audioState = null;
+
+    for (const team of room.teams.values()) {
+      team.score = 0;
+      team.timeline = [];
+    }
+
+    room.state = "playing";
+    room.isSuddenDeath = false;
+    room.suddenDeathTeams = [];
+    room.roundResults = new Map();
+    room.turnOrder = sortTeamIds(Array.from(room.teams.keys()));
+    room.turnIndex = 0;
+    room.roundStartIndex = 0;
+    room.roundTurnsRemaining = room.turnOrder.length;
+    room.activeTeamId = room.turnOrder[0] || null;
+
+    io.to(roomCode).emit("room:teams", { teams: Array.from(room.teams.values()) });
+    io.to(roomCode).emit("game:started", {
+      state: room.state,
+      activeTeamId: room.activeTeamId,
+      turnOrder: room.turnOrder,
+      remainingCards: room.deck.length,
+    });
+    broadcastRoomState(roomCode, room);
+  });
+
   socket.on("game:host-skip-song", ({ roomCode } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) {

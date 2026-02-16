@@ -25,6 +25,7 @@
   export let onJoinTeam = () => {};
   export let onAudioSync = () => {};
   export let onHostSkipSong = () => {};
+  export let onHostSoftReset = () => {};
 
   const timelineSlots = 6;
   const logoSrc = "/assets/hitster-logo.png";
@@ -271,32 +272,6 @@
       isPaused: partial.isPaused ?? isPaused,
     });
   };
-
-
-  const hostTogglePauseAll = () => {
-    if (!isHost || !currentVideoId) {
-      return;
-    }
-    const nextPaused = !isPaused;
-    if (nextPaused) {
-      sendPlayerCommand("pauseVideo");
-    } else {
-      sendPlayerCommand("playVideo");
-    }
-    isPaused = nextPaused;
-    emitAudioSync({ isPaused: nextPaused });
-  };
-
-  const hostRestartSong = () => {
-    if (!isHost || !currentVideoId || !playerReady) {
-      return;
-    }
-    sendPlayerCommand("seekTo", [0, true]);
-    playerCurrentTime = 0;
-    isPaused = false;
-    emitAudioSync({ currentTime: 0, isPaused: false });
-  };
-
   const seekRelative = (seconds) => {
     if (!playerReady) {
       return;
@@ -486,8 +461,7 @@
         <div class="host-menu-panel">
           <h3>Host Menü</h3>
           <button type="button" on:click={onHostSkipSong}>Song für alle skippen</button>
-          <button type="button" on:click={hostRestartSong}>Song neu starten (0:00)</button>
-          <button type="button" on:click={hostTogglePauseAll}>{isPaused ? "Für alle fortsetzen" : "Für alle pausieren"}</button>
+          <button type="button" on:click={onHostSoftReset}>Soft Reset (Spiel neu starten)</button>
         </div>
       {/if}
       <button
@@ -499,7 +473,9 @@
           showHostMenu = !showHostMenu;
         }}
       >
-        ⚙️
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M19.14 12.94a7.96 7.96 0 0 0 .06-.94c0-.32-.02-.63-.07-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.45 7.45 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.22-1.12.53-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.66 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.05.31-.07.62-.07.94 0 .32.02.63.07.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.41 1.05.72 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.58-.22 1.13-.53 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.02-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z" />
+        </svg>
       </button>
     </div>
   {/if}
@@ -821,48 +797,67 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 8px;
+    gap: 10px;
   }
 
   .host-menu-toggle {
-    width: 48px;
-    height: 48px;
+    width: 52px;
+    height: 52px;
     border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.24);
-    background: rgba(20, 20, 30, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.34);
+    background: linear-gradient(135deg, rgba(255, 59, 212, 0.85), rgba(94, 59, 255, 0.9));
     color: #fff;
-    font-size: 22px;
     cursor: pointer;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 8px 24px rgba(28, 13, 52, 0.55);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: transform 120ms ease, box-shadow 120ms ease;
+  }
+
+  .host-menu-toggle:hover {
+    transform: translateY(-1px) scale(1.02);
+    box-shadow: 0 10px 28px rgba(44, 22, 80, 0.62);
+  }
+
+  .host-menu-toggle svg {
+    width: 24px;
+    height: 24px;
+    fill: currentColor;
   }
 
   .host-menu-panel {
-    min-width: 220px;
-    background: rgba(17, 17, 24, 0.96);
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    min-width: 250px;
+    background: rgba(12, 12, 18, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.16);
     border-radius: 14px;
-    padding: 10px;
+    padding: 12px;
     display: grid;
-    gap: 8px;
-    box-shadow: 0 14px 24px rgba(0, 0, 0, 0.42);
+    gap: 10px;
+    box-shadow: 0 16px 28px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(3px);
   }
 
   .host-menu-panel h3 {
-    margin: 0 0 4px;
+    margin: 0;
     font-size: 14px;
+    letter-spacing: 0.04em;
+    color: rgba(255, 255, 255, 0.92);
   }
 
   .host-menu-panel button {
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.07);
     color: #fff;
     border-radius: 10px;
-    padding: 8px 10px;
+    padding: 9px 10px;
     text-align: left;
     cursor: pointer;
+    font-weight: 600;
   }
 
   .host-menu-panel button:hover {
-    background: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.14);
   }
 </style>
