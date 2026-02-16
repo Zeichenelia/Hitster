@@ -26,6 +26,7 @@
   export let onAudioSync = () => {};
   export let onHostSkipSong = () => {};
   export let onHostSoftReset = () => {};
+  export let onReturnToLobby = () => {};
 
   const timelineSlots = 6;
   const logoSrc = "/assets/hitster-logo.png";
@@ -450,6 +451,9 @@
     {/if}
     {#if gameState === "finished"}
       <p class="hint">Game finished</p>
+      {#if isHost}
+        <button class="secondary" on:click={onReturnToLobby}>Zur Lobby</button>
+      {/if}
     {/if}
   </div>
 </header>
