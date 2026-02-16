@@ -51,7 +51,7 @@
     <div class="winner-actions">
       <button class="play-again-btn primary" on:click={handlePlayAgain}>Nochmal spielen</button>
       {#if isHost}
-        <button class="return-lobby-btn secondary" on:click={handleReturnToLobby}>Zur Lobby</button>
+        <button class="play-again-btn primary return-lobby-btn" on:click={handleReturnToLobby}>Zur Lobby</button>
       {/if}
     </div>
   </div>
@@ -163,19 +163,19 @@
 
   .winner-actions {
     display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
+    flex-direction: column;
+    align-items: center;
     gap: 12px;
     margin-top: 2rem;
   }
 
   .winner-actions button {
     margin-top: 0;
+    width: min(320px, 90vw);
   }
 
   .return-lobby-btn {
-    padding: 0.75rem 2rem;
-    border-radius: 999px;
+    margin-top: 0;
   }
 
   .confetti-container {
