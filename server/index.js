@@ -599,6 +599,37 @@ io.on("connection", (socket) => {
     broadcastRoomState(roomCode, room);
   });
 
+  socket.on("game:return-to-lobby", ({ roomCode } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room) {
+      socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
+      return;
+    }
+
+    if (socket.id !== room.hostId) {
+      socket.emit("error", { code: "NOT_HOST", message: "Only the host can return to lobby" });
+      return;
+    }
+
+    room.state = "lobby";
+    room.currentCard = null;
+    room.pendingPlacement = null;
+    room.pendingDiscard = null;
+    room.audioState = null;
+    room.activeTeamId = "";
+    room.isSuddenDeath = false;
+    room.suddenDeathTeams = [];
+    room.roundResults = new Map();
+
+    for (const team of room.teams.values()) {
+      team.score = 0;
+      team.timeline = [];
+    }
+
+    io.to(roomCode).emit("room:teams", { teams: Array.from(room.teams.values()) });
+    broadcastRoomState(roomCode, room);
+  });
+
   socket.on("game:host-skip-song", ({ roomCode } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) {

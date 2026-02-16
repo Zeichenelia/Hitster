@@ -4,11 +4,16 @@
   export let winnerName = "";
   export let winnerPlayers = [];
   export let playerColors = {};
+  export let isHost = false;
 
   const dispatch = createEventDispatcher();
 
   function handlePlayAgain() {
     dispatch("playAgain");
+  }
+
+  function handleReturnToLobby() {
+    dispatch("returnToLobby");
   }
 </script>
 
@@ -43,7 +48,12 @@
       </div>
     {/if}
     <p class="win-message">hat Hitster gewonnen!</p>
-    <button class="play-again-btn primary" on:click={handlePlayAgain}>Nochmal spielen</button>
+    <div class="winner-actions">
+      <button class="play-again-btn primary" on:click={handlePlayAgain}>Nochmal spielen</button>
+      {#if isHost}
+        <button class="return-lobby-btn secondary" on:click={handleReturnToLobby}>Zur Lobby</button>
+      {/if}
+    </div>
   </div>
 </div>
 
@@ -151,6 +161,23 @@
     transform: translateY(-1px) scale(1.02);
   }
 
+  .winner-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 2rem;
+  }
+
+  .winner-actions button {
+    margin-top: 0;
+  }
+
+  .return-lobby-btn {
+    padding: 0.75rem 2rem;
+    border-radius: 999px;
+  }
+
   .confetti-container {
     position: absolute;
     top: 0;
@@ -186,3 +213,4 @@
     }
   }
 </style>
+
