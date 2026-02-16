@@ -458,6 +458,19 @@
     socket.emit("game:start", { roomCode });
   }
 
+  function returnToLobby() {
+    showWinner = false;
+    if (!roomCode) {
+      lastError = "room code required";
+      return;
+    }
+    if (!isHost) {
+      lastError = "only host can return to lobby";
+      return;
+    }
+    socket.emit("game:return-to-lobby", { roomCode });
+  }
+
   function handlePlayAgain() {
     showWinner = false;
     if (isHost) {
@@ -652,6 +665,7 @@
       onAudioSync={syncAudioState}
       onHostSkipSong={hostSkipSong}
       onHostSoftReset={hostSoftReset}
+      onReturnToLobby={returnToLobby}
     />
   {:else}
     <LobbyView
@@ -683,7 +697,9 @@
     winnerName={winnerTeamName}
     {winnerPlayers}
     {playerColors}
+    {isHost}
     on:playAgain={handlePlayAgain}
+    on:returnToLobby={returnToLobby}
   />
 {/if}
 

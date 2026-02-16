@@ -599,6 +599,37 @@ io.on("connection", (socket) => {
     broadcastRoomState(roomCode, room);
   });
 
+  socket.on("game:return-to-lobby", ({ roomCode } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room) {
+      socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
+      return;
+    }
+
+    if (socket.id !== room.hostId) {
+      socket.emit("error", { code: "NOT_HOST", message: "Only the host can return to lobby" });
+      return;
+    }
+
+    room.state = "lobby";
+    room.currentCard = null;
+    room.pendingPlacement = null;
+    room.pendingDiscard = null;
+    room.audioState = null;
+    room.activeTeamId = "";
+    room.isSuddenDeath = false;
+    room.suddenDeathTeams = [];
+    room.roundResults = new Map();
+
+    for (const team of room.teams.values()) {
+      team.score = 0;
+      team.timeline = [];
+    }
+
+    io.to(roomCode).emit("room:teams", { teams: Array.from(room.teams.values()) });
+    broadcastRoomState(roomCode, room);
+  });
+
   socket.on("game:host-skip-song", ({ roomCode } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) {
@@ -739,7 +770,7 @@ io.on("connection", (socket) => {
       team.timeline = [room.currentCard];
       const revealedCard = room.currentCard;
       room.currentCard = null;
-      room.audioState = createAudioState(revealedCard);
+      room.audioState = room.audioState?.videoId ? room.audioState : createAudioState(revealedCard);
       room.roundResults.set(team.id, true);
       room.turnIndex = (room.turnIndex + 1) % room.turnOrder.length;
       room.activeTeamId = room.turnOrder[room.turnIndex];
@@ -820,7 +851,7 @@ io.on("connection", (socket) => {
 
     const revealedCard = room.currentCard;
     room.currentCard = null;
-    room.audioState = createAudioState(revealedCard);
+    room.audioState = room.audioState?.videoId ? room.audioState : createAudioState(revealedCard);
     room.pendingPlacement = null;
     room.turnIndex = (room.turnIndex + 1) % room.turnOrder.length;
     room.activeTeamId = room.turnOrder[room.turnIndex];
