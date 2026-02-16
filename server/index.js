@@ -19,6 +19,15 @@ app.get("/packs", (_req, res) => {
   res.json(Array.from(packIndex.values()));
 });
 
+app.get("/pack-logo/:packId", (req, res) => {
+  const pack = packIndex.get(req.params.packId);
+  if (!pack?.logo) {
+    res.status(404).json({ code: "PACK_LOGO_NOT_FOUND" });
+    return;
+  }
+  res.sendFile(path.join(REPO_ROOT, pack.logo));
+});
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -38,6 +47,24 @@ function loadPackIndex() {
 }
 
 const packIndex = loadPackIndex();
+
+function serializeCardForClient(card) {
+  if (!card) {
+    return null;
+  }
+  const pack = packIndex.get(card.packId);
+  return {
+    id: card.id,
+    url: card.url || "",
+    packId: card.packId || "",
+    packName: pack?.name || "",
+    cardNumber: card.cardNumber || "",
+    playlistAvatarUrl: pack?.logo ? `/pack-logo/${encodeURIComponent(card.packId)}` : "",
+    title: card.title || "",
+    artist: card.artist || "",
+    year: card.year ?? "",
+  };
+}
 
 function shuffleDeck(deck) {
   for (let i = deck.length - 1; i > 0; i -= 1) {
@@ -60,7 +87,7 @@ function loadDeckFromPacks(packIds) {
     for (const row of records) {
       const parsedYear = Number.parseInt(row["Year"], 10);
       const year = Number.isNaN(parsedYear) ? row["Year"] : parsedYear;
-      const cardNumber = row["Card#"] || "";
+      const cardNumber = row["Card#"] || row["﻿Card#"] || "";
       cards.push({
         id: `${packId}-${cardNumber || cards.length + 1}`,
         packId,
@@ -85,7 +112,7 @@ function serializeRoomState(room) {
     players: Array.from(room.players.values()),
     teams: Array.from(room.teams.values()),
     activeTeamId: room.activeTeamId,
-    currentCard: room.currentCard ? { id: room.currentCard.id, url: room.currentCard.url || "" } : null,
+    currentCard: serializeCardForClient(room.currentCard),
     remainingCards: room.deck.length,
     pendingPlacement: room.pendingPlacement || null,
   };
@@ -506,7 +533,7 @@ io.on("connection", (socket) => {
       room.currentCard = nextCard;
       io.to(roomCode).emit("game:next-turn", {
         activeTeamId: room.activeTeamId,
-        card: { id: nextCard.id, url: nextCard.url || "" },
+        card: serializeCardForClient(nextCard),
         remainingCards: room.deck.length,
       });
       broadcastRoomState(roomCode, room);
@@ -559,7 +586,7 @@ io.on("connection", (socket) => {
 
       io.to(roomCode).emit("game:card-revealed", {
         teamId: team.id,
-        card: revealedCard,
+        card: serializeCardForClient(revealedCard),
         correct: true,
         position: 0,
         activeTeamId: room.activeTeamId,
@@ -638,7 +665,7 @@ io.on("connection", (socket) => {
 
     io.to(roomCode).emit("game:card-revealed", {
       teamId: team.id,
-      card: revealedCard,
+      card: serializeCardForClient(revealedCard),
       correct,
       position: index,
       activeTeamId: room.activeTeamId,
