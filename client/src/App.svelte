@@ -287,7 +287,9 @@
     remainingCards = payload.remainingCards ?? remainingCards;
     currentCard = null;
     playerCard = normalizeCard(payload.card);
-    audioUrl = payload.card?.url || "";
+    if (!audioUrl && payload.card?.url) {
+      audioUrl = payload.card.url;
+    }
     lastRevealCorrect = Boolean(payload.correct);
     lastRevealedCard = payload.correct ? null : payload.card || null;
     lastRevealPosition = payload.correct ? -1 : payload.position ?? -1;
