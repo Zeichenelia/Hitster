@@ -8,6 +8,7 @@
   export let currentCard = null;
   export let playerCard = null;
   export let audioUrl = "";
+  export let audioState = null;
   export let lastPlacedCardId = "";
   export let lastPlacedTeamId = "";
   export let lastRevealedCard = null;
@@ -22,6 +23,7 @@
   export let onPlaceCard = () => {};
   export let onRevealCard = () => {};
   export let onJoinTeam = () => {};
+  export let onAudioSync = () => {};
 
   const timelineSlots = 6;
   const logoSrc = "/assets/hitster-logo.png";
@@ -48,6 +50,7 @@
   let avatarCandidates = [];
   let avatarIndex = 0;
   let playerPollTimer;
+  let broadcastPollTimer;
 
   const autoScrollX = (node) => {
     let frame;
@@ -237,6 +240,36 @@
     syncVolume();
   }
 
+  $: if (audioState && playerReady && currentVideoId && audioState.videoId === currentVideoId) {
+    const baseTime = Number.isFinite(Number(audioState.currentTime)) ? Math.max(0, Number(audioState.currentTime)) : 0;
+    const elapsed = audioState.isPaused ? 0 : Math.max(0, (Date.now() - Number(audioState.updatedAt || Date.now())) / 1000);
+    const targetTime = baseTime + elapsed;
+    if (Math.abs(targetTime - playerCurrentTime) > 1.2) {
+      sendPlayerCommand("seekTo", [targetTime, true]);
+      playerCurrentTime = targetTime;
+    }
+    if (Boolean(audioState.isPaused) !== isPaused) {
+      if (audioState.isPaused) {
+        sendPlayerCommand("pauseVideo");
+        isPaused = true;
+      } else {
+        sendPlayerCommand("playVideo");
+        isPaused = false;
+      }
+    }
+  }
+
+  const emitAudioSync = (partial = {}) => {
+    if (!currentVideoId) {
+      return;
+    }
+    onAudioSync({
+      videoId: partial.videoId || currentVideoId,
+      currentTime: partial.currentTime ?? playerCurrentTime,
+      isPaused: partial.isPaused ?? isPaused,
+    });
+  };
+
 
   const seekRelative = (seconds) => {
     if (!playerReady) {
@@ -245,6 +278,7 @@
     const nextTime = Math.max(0, Math.min(playerDuration || Infinity, playerCurrentTime + seconds));
     sendPlayerCommand("seekTo", [nextTime, true]);
     playerCurrentTime = nextTime;
+    emitAudioSync({ currentTime: nextTime, isPaused });
   };
 
   const togglePlayback = () => {
@@ -254,10 +288,12 @@
     if (isPaused) {
       sendPlayerCommand("playVideo");
       isPaused = false;
+      emitAudioSync({ isPaused: false });
       return;
     }
     sendPlayerCommand("pauseVideo");
     isPaused = true;
+    emitAudioSync({ isPaused: true });
   };
 
   const syncPlaybackProgress = () => {
@@ -276,6 +312,7 @@
     const nextTime = Math.max(0, Math.min(playerDuration, ratio * playerDuration));
     sendPlayerCommand("seekTo", [nextTime, true]);
     playerCurrentTime = nextTime;
+    emitAudioSync({ currentTime: nextTime, isPaused });
   };
 
   const handleSeekPointerDown = (event) => {
@@ -366,6 +403,11 @@
       };
       window.addEventListener("pointerdown", handleFirstInteract, { once: true });
       playerPollTimer = window.setInterval(syncPlaybackProgress, 500);
+      broadcastPollTimer = window.setInterval(() => {
+        if (isActiveTeamMember && playerReady && currentVideoId) {
+          emitAudioSync();
+        }
+      }, 2000);
     }
     return () => {
       if (typeof window !== "undefined") {
@@ -373,6 +415,9 @@
         window.removeEventListener("message", handlePlayerMessage);
         if (playerPollTimer) {
           window.clearInterval(playerPollTimer);
+        }
+        if (broadcastPollTimer) {
+          window.clearInterval(broadcastPollTimer);
         }
       }
     };
