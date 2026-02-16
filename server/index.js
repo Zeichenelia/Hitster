@@ -644,7 +644,6 @@ io.on("connection", (socket) => {
       activeTeamId: room.activeTeamId,
       card: serializeCardForClient(nextCard),
       remainingCards: room.deck.length,
-      audioState: room.audioState,
     });
     broadcastRoomState(roomCode, room);
   });

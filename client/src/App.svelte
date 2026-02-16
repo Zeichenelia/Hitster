@@ -209,7 +209,9 @@
     }
     remainingCards = payload.remainingCards ?? remainingCards;
     pendingPlacement = payload.pendingPlacement || null;
-    audioState = payload.audioState || null;
+    if (payload.audioState) {
+      audioState = payload.audioState;
+    }
     const statePlayers = payload.players || players;
     const currentPlayer = getPlayerByClientId(statePlayers) || statePlayers.find((player) => player.id === socketId);
     if (currentPlayer?.name && currentPlayer.name !== joinName) {
@@ -294,7 +296,9 @@
     lastPlacedTeamId = payload.correct ? payload.teamId || "" : "";
     autoPlacedCardId = "";
     pendingPlacement = null;
-    audioState = payload.audioState || null;
+    if (payload.audioState) {
+      audioState = payload.audioState;
+    }
   });
 
   socket.on("audio:state", (payload) => {
