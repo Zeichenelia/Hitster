@@ -739,7 +739,7 @@ io.on("connection", (socket) => {
       team.timeline = [room.currentCard];
       const revealedCard = room.currentCard;
       room.currentCard = null;
-      room.audioState = createAudioState(revealedCard);
+      room.audioState = room.audioState?.videoId ? room.audioState : createAudioState(revealedCard);
       room.roundResults.set(team.id, true);
       room.turnIndex = (room.turnIndex + 1) % room.turnOrder.length;
       room.activeTeamId = room.turnOrder[room.turnIndex];
@@ -820,7 +820,7 @@ io.on("connection", (socket) => {
 
     const revealedCard = room.currentCard;
     room.currentCard = null;
-    room.audioState = createAudioState(revealedCard);
+    room.audioState = room.audioState?.videoId ? room.audioState : createAudioState(revealedCard);
     room.pendingPlacement = null;
     room.turnIndex = (room.turnIndex + 1) % room.turnOrder.length;
     room.activeTeamId = room.turnOrder[room.turnIndex];
