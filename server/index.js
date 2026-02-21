@@ -395,10 +395,6 @@ io.on("connection", (socket) => {
       return;
     }
 
-    if (requestingPlayer.teamId !== room.activeTeamId && socket.id !== room.hostId) {
-      return;
-    }
-
     const normalizedVideoId = typeof videoId === "string" ? videoId : "";
     if (!normalizedVideoId) {
       return;
