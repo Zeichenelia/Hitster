@@ -391,7 +391,7 @@ io.on("connection", (socket) => {
       return;
     }
 
-    if (room.state !== "playing" || !room.currentCard) {
+    if (room.state !== "playing") {
       return;
     }
 
@@ -401,6 +401,9 @@ io.on("connection", (socket) => {
     }
 
     const prevState = room.audioState || createAudioState(room.currentCard);
+    if (!prevState.videoId) {
+      return;
+    }
     if (prevState.videoId && prevState.videoId !== normalizedVideoId) {
       return;
     }
