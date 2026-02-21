@@ -378,7 +378,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("audio:sync", ({ roomCode, videoId, currentTime, isPaused } = {}) => {
+  socket.on("audio:sync", ({ roomCode, videoId, currentTime, isPaused, interaction } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) {
       socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
@@ -412,6 +412,7 @@ io.on("connection", (socket) => {
       ? Math.max(0, Number(currentTime))
       : prevState.currentTime || 0;
     const normalizedPaused = typeof isPaused === "boolean" ? isPaused : Boolean(prevState.isPaused);
+    const isInteraction = Boolean(interaction);
 
     const now = Date.now();
     const authorityTimeoutMs = 4500;
@@ -425,7 +426,14 @@ io.on("connection", (socket) => {
       return;
     }
 
-    room.audioSyncAuthorityId = socket.id;
+    const shouldBroadcast = isInteraction || pauseStateChanged || isMajorCorrection;
+
+    if (!hasAuthority) {
+      if (!shouldBroadcast) {
+        return;
+      }
+      room.audioSyncAuthorityId = socket.id;
+    }
     room.audioSyncAuthorityUpdatedAt = now;
 
     const nextAudioState = {
@@ -436,7 +444,10 @@ io.on("connection", (socket) => {
     };
 
     room.audioState = nextAudioState;
-    io.to(roomCode).emit("audio:state", nextAudioState);
+
+    if (shouldBroadcast) {
+      io.to(roomCode).emit("audio:state", nextAudioState);
+    }
   });
 
   socket.on("team:join", ({ roomCode, teamId, playerName, clientId } = {}) => {
