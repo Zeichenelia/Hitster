@@ -231,6 +231,8 @@ function createRoom(code, hostId, hostName) {
         discard: [],
         currentCard: null,
         audioState: null,
+        audioSyncAuthorityId: null,
+        audioSyncAuthorityUpdatedAt: 0,
         pendingPlacement: null,
         pendingDiscard: null,
         activeTeamId: null,
@@ -376,14 +378,20 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("audio:sync", ({ roomCode, videoId, currentTime, isPaused } = {}) => {
+  socket.on("audio:sync", ({ roomCode, videoId, currentTime, isPaused, interaction } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) {
       socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
       return;
     }
 
-    if (socket.id !== room.hostId) {
+    const requestingPlayer = room.players.get(socket.id);
+    if (!requestingPlayer) {
+      socket.emit("error", { code: "PLAYER_NOT_FOUND", message: "Player not found" });
+      return;
+    }
+
+    if (room.state !== "playing") {
       return;
     }
 
@@ -393,6 +401,9 @@ io.on("connection", (socket) => {
     }
 
     const prevState = room.audioState || createAudioState(room.currentCard);
+    if (!prevState.videoId) {
+      return;
+    }
     if (prevState.videoId && prevState.videoId !== normalizedVideoId) {
       return;
     }
@@ -400,16 +411,43 @@ io.on("connection", (socket) => {
     const normalizedTime = Number.isFinite(Number(currentTime))
       ? Math.max(0, Number(currentTime))
       : prevState.currentTime || 0;
+    const normalizedPaused = typeof isPaused === "boolean" ? isPaused : Boolean(prevState.isPaused);
+    const isInteraction = Boolean(interaction);
+
+    const now = Date.now();
+    const authorityTimeoutMs = 4500;
+    const hasAuthority = room.audioSyncAuthorityId === socket.id;
+    const authorityExpired = now - (room.audioSyncAuthorityUpdatedAt || 0) > authorityTimeoutMs;
+    const isMajorCorrection = Math.abs(normalizedTime - (prevState.currentTime || 0)) >= 1.5;
+    const pauseStateChanged = normalizedPaused !== Boolean(prevState.isPaused);
+    const canTakeAuthority = !room.audioSyncAuthorityId || hasAuthority || authorityExpired || isMajorCorrection || pauseStateChanged;
+
+    if (!canTakeAuthority) {
+      return;
+    }
+
+    const shouldBroadcast = isInteraction || pauseStateChanged || isMajorCorrection;
+
+    if (!hasAuthority) {
+      if (!shouldBroadcast) {
+        return;
+      }
+      room.audioSyncAuthorityId = socket.id;
+    }
+    room.audioSyncAuthorityUpdatedAt = now;
 
     const nextAudioState = {
       videoId: normalizedVideoId,
       currentTime: normalizedTime,
-      isPaused: typeof isPaused === "boolean" ? isPaused : Boolean(prevState.isPaused),
-      updatedAt: Date.now(),
+      isPaused: normalizedPaused,
+      updatedAt: now,
     };
 
     room.audioState = nextAudioState;
-    io.to(roomCode).emit("audio:state", nextAudioState);
+
+    if (shouldBroadcast) {
+      io.to(roomCode).emit("audio:state", nextAudioState);
+    }
   });
 
   socket.on("team:join", ({ roomCode, teamId, playerName, clientId } = {}) => {
@@ -522,6 +560,8 @@ io.on("connection", (socket) => {
     room.discard = [];
     room.currentCard = null;
     room.audioState = null;
+    room.audioSyncAuthorityId = null;
+    room.audioSyncAuthorityUpdatedAt = 0;
     room.pendingDiscard = null;
 
     for (const team of room.teams.values()) {
@@ -577,6 +617,8 @@ io.on("connection", (socket) => {
     room.pendingPlacement = null;
     room.pendingDiscard = null;
     room.audioState = null;
+    room.audioSyncAuthorityId = null;
+    room.audioSyncAuthorityUpdatedAt = 0;
 
     for (const team of room.teams.values()) {
       team.score = 0;
@@ -620,6 +662,8 @@ io.on("connection", (socket) => {
     room.pendingPlacement = null;
     room.pendingDiscard = null;
     room.audioState = null;
+    room.audioSyncAuthorityId = null;
+    room.audioSyncAuthorityUpdatedAt = 0;
     room.activeTeamId = "";
     room.isSuddenDeath = false;
     room.suddenDeathTeams = [];
@@ -666,6 +710,8 @@ io.on("connection", (socket) => {
     if (room.deck.length === 0) {
       room.currentCard = null;
       room.audioState = null;
+      room.audioSyncAuthorityId = null;
+      room.audioSyncAuthorityUpdatedAt = 0;
       io.to(roomCode).emit("game:deck-empty", { remainingCards: 0 });
       broadcastRoomState(roomCode, room);
       return;
@@ -674,6 +720,8 @@ io.on("connection", (socket) => {
     const nextCard = room.deck.pop();
     room.currentCard = nextCard;
     room.audioState = createAudioState(nextCard);
+    room.audioSyncAuthorityId = null;
+    room.audioSyncAuthorityUpdatedAt = 0;
 
     io.to(roomCode).emit("game:host-song-skipped", {
       activeTeamId: room.activeTeamId,
@@ -724,6 +772,8 @@ io.on("connection", (socket) => {
       const nextCard = room.deck.pop();
       room.currentCard = nextCard;
       room.audioState = createAudioState(nextCard);
+      room.audioSyncAuthorityId = null;
+      room.audioSyncAuthorityUpdatedAt = 0;
       io.to(roomCode).emit("game:next-turn", {
         activeTeamId: room.activeTeamId,
         card: serializeCardForClient(nextCard),

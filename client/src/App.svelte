@@ -535,6 +535,7 @@
       videoId: partial.videoId || audioState?.videoId || "",
       currentTime: partial.currentTime ?? audioState?.currentTime ?? 0,
       isPaused: partial.isPaused ?? audioState?.isPaused ?? false,
+      interaction: Boolean(partial.interaction),
     });
   }
 
