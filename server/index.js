@@ -383,6 +383,10 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (socket.id !== room.hostId) {
+      return;
+    }
+
     const normalizedVideoId = typeof videoId === "string" ? videoId : "";
     if (!normalizedVideoId) {
       return;
