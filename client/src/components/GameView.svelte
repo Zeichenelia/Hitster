@@ -271,6 +271,7 @@
       videoId: partial.videoId || currentVideoId,
       currentTime: partial.currentTime ?? playerCurrentTime,
       isPaused: partial.isPaused ?? isPaused,
+      interaction: Boolean(partial.interaction),
     });
   };
   const seekRelative = (seconds) => {
@@ -280,7 +281,7 @@
     const nextTime = Math.max(0, Math.min(playerDuration || Infinity, playerCurrentTime + seconds));
     sendPlayerCommand("seekTo", [nextTime, true]);
     playerCurrentTime = nextTime;
-    emitAudioSync({ currentTime: nextTime, isPaused });
+    emitAudioSync({ currentTime: nextTime, isPaused, interaction: true });
   };
 
   const togglePlayback = () => {
@@ -290,12 +291,12 @@
     if (isPaused) {
       sendPlayerCommand("playVideo");
       isPaused = false;
-      emitAudioSync({ isPaused: false });
+      emitAudioSync({ isPaused: false, interaction: true });
       return;
     }
     sendPlayerCommand("pauseVideo");
     isPaused = true;
-    emitAudioSync({ isPaused: true });
+    emitAudioSync({ isPaused: true, interaction: true });
   };
 
   const syncPlaybackProgress = () => {
@@ -314,7 +315,7 @@
     const nextTime = Math.max(0, Math.min(playerDuration, ratio * playerDuration));
     sendPlayerCommand("seekTo", [nextTime, true]);
     playerCurrentTime = nextTime;
-    emitAudioSync({ currentTime: nextTime, isPaused });
+    emitAudioSync({ currentTime: nextTime, isPaused, interaction: true });
   };
 
   const handleSeekPointerDown = (event) => {
@@ -407,7 +408,7 @@
       playerPollTimer = window.setInterval(syncPlaybackProgress, 500);
       broadcastPollTimer = window.setInterval(() => {
         if (isActiveTeamMember && playerReady && currentVideoId) {
-          emitAudioSync();
+          emitAudioSync({ interaction: false });
         }
       }, 2000);
     }
