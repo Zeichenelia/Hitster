@@ -53,7 +53,6 @@
   let avatarCandidates = [];
   let avatarIndex = 0;
   let playerPollTimer;
-  let broadcastPollTimer;
   let showHostMenu = false;
 
   const autoScrollX = (node) => {
@@ -406,11 +405,6 @@
       };
       window.addEventListener("pointerdown", handleFirstInteract, { once: true });
       playerPollTimer = window.setInterval(syncPlaybackProgress, 500);
-      broadcastPollTimer = window.setInterval(() => {
-        if (isActiveTeamMember && playerReady && currentVideoId) {
-          emitAudioSync({ interaction: false });
-        }
-      }, 2000);
     }
     return () => {
       if (typeof window !== "undefined") {
@@ -418,9 +412,6 @@
         window.removeEventListener("message", handlePlayerMessage);
         if (playerPollTimer) {
           window.clearInterval(playerPollTimer);
-        }
-        if (broadcastPollTimer) {
-          window.clearInterval(broadcastPollTimer);
         }
       }
     };
