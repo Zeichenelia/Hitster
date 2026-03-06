@@ -458,6 +458,18 @@
     socket.emit("game:start", { roomCode });
   }
 
+  function randomizeTeams() {
+    if (!roomCode) {
+      lastError = "room code required";
+      return;
+    }
+    if (!isHost) {
+      lastError = "only host can randomize teams";
+      return;
+    }
+    socket.emit("team:randomize", { roomCode });
+  }
+
   function returnToLobby() {
     showWinner = false;
     if (!roomCode) {
@@ -474,7 +486,7 @@
   function handlePlayAgain() {
     showWinner = false;
     if (isHost) {
-      startGame();
+      hostSoftReset(true);
     }
   }
 
@@ -498,7 +510,7 @@
     socket.emit("game:host-skip-song", { roomCode });
   }
 
-  function hostSoftReset() {
+  function hostSoftReset(randomizeTeams = false) {
     if (!roomCode) {
       lastError = "room code required";
       return;
@@ -507,7 +519,7 @@
       lastError = "only host can use host menu";
       return;
     }
-    socket.emit("game:host-soft-reset", { roomCode });
+    socket.emit("game:host-soft-reset", { roomCode, randomizeTeams });
   }
 
   function placeCard(position) {
@@ -711,6 +723,7 @@
       onJoinTeam={joinTeam}
       onRenameTeam={renameTeam}
       onStartGame={startGame}
+      onRandomizeTeams={randomizeTeams}
       onNextTurn={nextTurn}
     />
   {/if}
@@ -2020,3 +2033,4 @@
     }
   }
 </style>
+

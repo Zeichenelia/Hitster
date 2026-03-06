@@ -18,6 +18,7 @@
   export let onJoinTeam = () => {};
   export let onRenameTeam = () => {};
   export let onStartGame = () => {};
+  export let onRandomizeTeams = () => {};
   export let onNextTurn = () => {};
 
   let inviteCopied = false;
@@ -221,8 +222,11 @@
         <h2>Host controls</h2>
         <p class="hint">Temporary controls for testing the flow.</p>
         <div class="stack">
-          <button class="primary" on:click={onStartGame} disabled={!canStartGame}>Start game</button>
-          {#if !canStartGame}
+          <button class="primary" on:click={onStartGame} disabled={!isHost || !canStartGame}>Start game</button>
+          <button class="ghost" on:click={onRandomizeTeams} disabled={!isHost || players.length === 0}>Randomize teams</button>
+          {#if !isHost}
+            <p class="muted">Only the host can control teams and start the game.</p>
+          {:else if !canStartGame}
             <p class="muted">All players must join a team before game start.</p>
           {/if}
           {#if gameState === "playing"}
@@ -337,3 +341,4 @@
     text-align: center;
   }
 </style>
+

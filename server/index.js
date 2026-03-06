@@ -296,6 +296,36 @@ function applyTeamCount(room, teamCount) {
   }
 }
 
+function assignPlayersToRandomTeams(room) {
+  const players = Array.from(room.players.values());
+  const teamIds = sortTeamIds(Array.from(room.teams.keys()));
+
+  if (teamIds.length === 0) {
+    for (const player of players) {
+      player.teamId = null;
+    }
+    return;
+  }
+
+  for (let i = players.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [players[i], players[j]] = [players[j], players[i]];
+  }
+
+  const baseTeamSize = Math.floor(players.length / teamIds.length);
+  const teamsWithExtraPlayer = players.length % teamIds.length;
+
+  let playerIndex = 0;
+  for (let teamIndex = 0; teamIndex < teamIds.length; teamIndex += 1) {
+    const teamId = teamIds[teamIndex];
+    const teamSize = baseTeamSize + (teamIndex < teamsWithExtraPlayer ? 1 : 0);
+    for (let count = 0; count < teamSize; count += 1) {
+      players[playerIndex].teamId = teamId;
+      playerIndex += 1;
+    }
+  }
+}
+
 function createRoomCode() {
   const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
   let code = "";
@@ -535,6 +565,30 @@ io.on("connection", (socket) => {
     io.to(roomCode).emit("room:teams", { teams: Array.from(room.teams.values()) });
     broadcastRoomState(roomCode, room);
   });
+  socket.on("team:randomize", ({ roomCode } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room) {
+      socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
+      return;
+    }
+
+    if (socket.id !== room.hostId) {
+      socket.emit("error", { code: "NOT_HOST", message: "Only the host can randomize teams" });
+      return;
+    }
+
+    if (room.state !== "lobby" && room.state !== "finished") {
+      socket.emit("error", { code: "GAME_IN_PROGRESS", message: "Random teams are only available in lobby or after game end" });
+      return;
+    }
+
+    assignPlayersToRandomTeams(room);
+    io.to(roomCode).emit("room:players", {
+      players: Array.from(room.players.values()),
+    });
+    broadcastRoomState(roomCode, room);
+  });
+
   socket.on("rules:update", ({ roomCode, rules } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) {
@@ -572,7 +626,7 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on("game:start", ({ roomCode } = {}) => {
+  socket.on("game:start", ({ roomCode, randomizeTeams } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) {
       socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
@@ -593,6 +647,13 @@ io.on("connection", (socket) => {
     if (!Array.isArray(room.rules.packs) || room.rules.packs.length === 0) {
       socket.emit("error", { code: "NO_PACKS", message: "Select at least one pack" });
       return;
+    }
+
+    if (Boolean(randomizeTeams)) {
+      assignPlayersToRandomTeams(room);
+      io.to(roomCode).emit("room:players", {
+        players: Array.from(room.players.values()),
+      });
     }
 
     const unassignedPlayers = Array.from(room.players.values()).filter((player) => !player.teamId);
@@ -642,7 +703,7 @@ io.on("connection", (socket) => {
     broadcastRoomState(roomCode, room);
   });
 
-  socket.on("game:host-soft-reset", ({ roomCode } = {}) => {
+  socket.on("game:host-soft-reset", ({ roomCode, randomizeTeams } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) {
       socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
@@ -657,6 +718,13 @@ io.on("connection", (socket) => {
     if (!Array.isArray(room.rules.packs) || room.rules.packs.length === 0) {
       socket.emit("error", { code: "NO_PACKS", message: "Select at least one pack" });
       return;
+    }
+
+    if (Boolean(randomizeTeams)) {
+      assignPlayersToRandomTeams(room);
+      io.to(roomCode).emit("room:players", {
+        players: Array.from(room.players.values()),
+      });
     }
 
     const deck = loadDeckFromPacks(room.rules.packs);
@@ -1055,3 +1123,4 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
 });
+
