@@ -51,5 +51,11 @@
     "name": "Hitster Celebration",
     "file": "data/playlists/hitster-de-aaaa0040.csv",
     "logo": "data/playlists/pics/playlists_avatar/Avatar 9 – Hitster Celebration.png"
+  },
+  {
+    "id": "hitster-de-aaaa0043",
+    "name": "Hitster Feelgood",
+    "file": "data/playlists/hitster-de-aaaa0043.csv",
+    "logo": "data/playlists/pics/playlists_avatar/Avatar 10 – Hitster Feelgood.png"
   }
 ]
