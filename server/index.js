@@ -278,6 +278,13 @@ function createTeam(id, name) {
     };
 }
 
+function normalizeTeamName(name) {
+  if (typeof name !== "string") {
+    return "";
+  }
+  return name.trim().replace(/\s+/g, " ").slice(0, 40);
+}
+
 function applyTeamCount(room, teamCount) {
   room.teams = new Map();
   for (let i = 1; i <= teamCount; i += 1) {
@@ -481,6 +488,53 @@ io.on("connection", (socket) => {
     broadcastRoomState(roomCode, room);
   });
 
+  socket.on("team:rename", ({ roomCode, teamId, name, clientId } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room) {
+      socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
+      return;
+    }
+
+    socket.join(roomCode);
+
+    let requestingPlayer = room.players.get(socket.id);
+    if (!requestingPlayer && clientId) {
+      const existing = findPlayerByClientId(room, clientId);
+      if (existing) {
+        room.players.delete(existing.socketId);
+        existing.player.id = socket.id;
+        existing.player.connected = true;
+        room.players.set(socket.id, existing.player);
+        requestingPlayer = existing.player;
+      }
+    }
+
+    if (!requestingPlayer) {
+      socket.emit("error", { code: "PLAYER_NOT_FOUND", message: "Player not found" });
+      return;
+    }
+
+    const team = room.teams.get(teamId);
+    if (!team) {
+      socket.emit("error", { code: "TEAM_NOT_FOUND", message: "Team not found" });
+      return;
+    }
+
+    if (requestingPlayer.teamId !== teamId) {
+      socket.emit("error", { code: "NOT_TEAM_MEMBER", message: "Only team members can rename this team" });
+      return;
+    }
+
+    const normalizedName = normalizeTeamName(name);
+    if (!normalizedName) {
+      socket.emit("error", { code: "INVALID_TEAM_NAME", message: "Team name is required" });
+      return;
+    }
+
+    team.name = normalizedName;
+    io.to(roomCode).emit("room:teams", { teams: Array.from(room.teams.values()) });
+    broadcastRoomState(roomCode, room);
+  });
   socket.on("rules:update", ({ roomCode, rules } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) {
