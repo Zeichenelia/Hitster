@@ -573,6 +573,29 @@
     storedTeamId = teamId;
   }
 
+  function renameTeam(teamId, name) {
+    if (!roomCode) {
+      lastError = "room code required";
+      return;
+    }
+    const currentPlayer = getPlayerByClientId(players) || players.find((player) => player.id === socketId);
+    if (!currentPlayer || currentPlayer.teamId !== teamId) {
+      lastError = "only team members can rename this team";
+      return;
+    }
+    const normalizedName = String(name || "").trim();
+    if (!normalizedName) {
+      lastError = "team name required";
+      return;
+    }
+    lastError = "";
+    socket.emit("team:rename", {
+      roomCode,
+      teamId,
+      name: normalizedName,
+      clientId,
+    });
+  }
   $: if (typeof window !== "undefined") {
     if (storedTeamId) {
       window.localStorage.setItem("hitster:teamId", storedTeamId);
@@ -663,6 +686,7 @@
       onPlaceCard={placeCard}
       onRevealCard={revealCard}
       onJoinTeam={joinTeam}
+      onRenameTeam={renameTeam}
       onAudioSync={syncAudioState}
       onHostSkipSong={hostSkipSong}
       onHostSoftReset={hostSoftReset}
@@ -678,11 +702,14 @@
       {rules}
       {isHost}
       {hasJoined}
+      {socketId}
+      {clientId}
       {playerColors}
       bind:joinName
       {gameState}
       onJoinRoom={joinRoom}
       onJoinTeam={joinTeam}
+      onRenameTeam={renameTeam}
       onStartGame={startGame}
       onNextTurn={nextTurn}
     />

@@ -23,6 +23,7 @@
   export let onPlaceCard = () => {};
   export let onRevealCard = () => {};
   export let onJoinTeam = () => {};
+  export let onRenameTeam = () => {};
   export let onAudioSync = () => {};
   export let onHostSkipSong = () => {};
   export let onHostSoftReset = () => {};
@@ -54,6 +55,35 @@
   let avatarIndex = 0;
   let playerPollTimer;
   let showHostMenu = false;
+  let editingTeamId = "";
+  let draftTeamName = "";
+
+  const canRenameTeam = (teamId) => Boolean(myTeamId) && myTeamId === teamId;
+
+  const startRenameTeam = (team) => {
+    if (!canRenameTeam(team.id)) {
+      return;
+    }
+    editingTeamId = team.id;
+    draftTeamName = team.name || "";
+  };
+
+  const cancelRenameTeam = () => {
+    editingTeamId = "";
+    draftTeamName = "";
+  };
+
+  const submitRenameTeam = (teamId) => {
+    if (!canRenameTeam(teamId)) {
+      return;
+    }
+    const nextName = String(draftTeamName || "").trim();
+    if (!nextName) {
+      return;
+    }
+    onRenameTeam(teamId, nextName);
+    cancelRenameTeam();
+  };
 
   const autoScrollX = (node) => {
     let frame;
@@ -645,7 +675,40 @@
         <div class="team-timeline" class:active-team={team.id === activeTeamId}>
           <div class="team-header">
             <div>
-              <strong>{team.name}</strong>
+              <div class="team-name-row">
+                {#if editingTeamId === team.id}
+                  <input
+                    class="team-name-input"
+                    type="text"
+                    maxlength="40"
+                    bind:value={draftTeamName}
+                    on:keydown={(event) => {
+                      if (event.key === "Enter") {
+                        submitRenameTeam(team.id);
+                      }
+                      if (event.key === "Escape") {
+                        cancelRenameTeam();
+                      }
+                    }}
+                  />
+                  <button class="ghost team-edit-action" on:click={() => submitRenameTeam(team.id)}>Save</button>
+                  <button class="ghost team-edit-action" on:click={cancelRenameTeam}>Cancel</button>
+                {:else}
+                  <strong>{team.name}</strong>
+                  {#if canRenameTeam(team.id)}
+                    <button
+                      class="team-edit-button"
+                      type="button"
+                      aria-label="Teamnamen bearbeiten"
+                      on:click={() => startRenameTeam(team)}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm17.71-10.04a1.003 1.003 0 0 0 0-1.42l-2.5-2.5a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 2-1.66z" />
+                      </svg>
+                    </button>
+                  {/if}
+                {/if}
+              </div>
               <div class="team-players">
                 {#each playersByTeam[team.id] || [] as player}
                   <span
@@ -785,6 +848,40 @@
 
 
 <style>
+  .team-name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .team-name-input {
+    width: min(220px, 100%);
+  }
+
+  .team-edit-button {
+    padding: 4px;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .team-edit-button svg {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+  }
+
+  .team-edit-action {
+    padding: 6px 10px;
+  }
+
   .host-menu-shell {
     position: fixed;
     left: 18px;
@@ -857,3 +954,4 @@
     background: rgba(255, 255, 255, 0.14);
   }
 </style>
+
