@@ -83,7 +83,7 @@ function loadDeckFromPacks(packIds) {
     }
     const csvPath = path.join(REPO_ROOT, pack.file);
     const raw = fs.readFileSync(csvPath, "utf-8");
-    const records = parse(raw, { columns: true, skip_empty_lines: true });
+    const records = parse(raw, { columns: true, skip_empty_lines: true, bom: true });
     for (const row of records) {
       const parsedYear = Number.parseInt(row["Year"], 10);
       const year = Number.isNaN(parsedYear) ? row["Year"] : parsedYear;
