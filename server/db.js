@@ -13,6 +13,7 @@ let dbEnabled = false;
 let bridgeMode = false;
 let bridgeUrl = "";
 let bridgeSecret = "";
+let lastDbError = "";
 
 function slugifyPackId(name) {
   const base = String(name || "playlist")
@@ -238,6 +239,7 @@ async function initDatabase() {
       return;
     } catch (err) {
       console.error("[DB] PHP Bridge connection failed:", err.message);
+      lastDbError = err.message;
       dbEnabled = false;
       bridgeMode = false;
     }
@@ -661,6 +663,10 @@ function isDatabaseConnected() {
   return dbEnabled;
 }
 
+function getLastError() {
+  return lastDbError || "";
+}
+
 module.exports = {
   initDatabase,
   getAllPacks,
@@ -675,4 +681,5 @@ module.exports = {
   markSongBroken,
   parseCsvSongs,
   isDatabaseConnected,
+  getLastError,
 };

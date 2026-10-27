@@ -56,18 +56,29 @@ if (!$clientSecret || $clientSecret !== BRIDGE_SECRET) {
 // =============================================================================
 // DATENBANK-VERBINDUNG (PDO)
 // =============================================================================
-try {
-    $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', DB_HOST, DB_PORT, DB_NAME);
-    $pdo = new PDO($dsn, DB_USER, DB_PASS, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false,
-    ]);
-} catch (PDOException $e) {
+$hostsToTry = array_unique([DB_HOST, '127.0.0.1', 'localhost']);
+$pdo = null;
+$lastPdoError = null;
+
+foreach ($hostsToTry as $hostCandidate) {
+    try {
+        $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $hostCandidate, DB_PORT, DB_NAME);
+        $pdo = new PDO($dsn, DB_USER, DB_PASS, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false,
+        ]);
+        break;
+    } catch (PDOException $e) {
+        $lastPdoError = $e;
+    }
+}
+
+if (!$pdo) {
     http_response_code(500);
     echo json_encode([
         'success' => false,
-        'error' => 'Datenbankverbindung fehlgeschlagen: ' . $e->getMessage()
+        'error' => 'Datenbankverbindung fehlgeschlagen: ' . ($lastPdoError ? $lastPdoError->getMessage() : 'Unbekannter Fehler')
     ]);
     exit;
 }
