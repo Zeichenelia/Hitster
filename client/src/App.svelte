@@ -1507,9 +1507,11 @@
   }
 
   :global(.timeline-row) {
-    overflow-x: hidden;
+    overflow-x: auto;
     overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
     padding-bottom: 6px;
+    width: 100%;
   }
 
   :global(.timeline-row.has-lockin) {
@@ -1530,8 +1532,8 @@
     grid-auto-columns: max-content;
     gap: 0;
     align-items: stretch;
-    justify-content: center;
-    min-width: 100%;
+    width: max-content;
+    margin: 0 auto;
   }
 
   :global(.timeline-slot) {
@@ -1820,7 +1822,7 @@
   }
 
   :global(.pack-search) {
-    min-width: 200px;
+    width: min(240px, 100%);
   }
 
   :global(.field) {
@@ -1843,9 +1845,9 @@
   :global(.pack-list) {
     --pack-button-height: 64px;
     display: grid;
-    grid-template-columns: repeat(2, 220px);
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     grid-auto-rows: var(--pack-button-height);
-    gap: 8px 16px;
+    gap: 8px 12px;
     justify-content: center;
     padding-top: 4px;
   }
@@ -2125,10 +2127,55 @@
     gap: 12px;
   }
 
+  @media (max-width: 1200px) {
+    :global(.lobby-frame) {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    :global(.lobby-center) {
+      grid-column: 1 / -1;
+    }
+    :global(.timeline-cards) {
+      --timeline-card-width: clamp(110px, 14vw, 140px);
+      --drop-hit-width: 8px;
+    }
+  }
+
+  @media (max-width: 1180px), (max-height: 620px) {
+    :global(.game-hud) {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      width: 100%;
+    }
+
+    :global(.music-player-card) {
+      position: relative;
+      top: auto;
+      left: auto;
+      width: min(440px, 100%);
+      flex: 1 1 280px;
+    }
+
+    :global(.drawn-card) {
+      position: relative;
+      top: auto;
+      right: auto;
+      width: 112px;
+      height: 126px;
+      flex-shrink: 0;
+    }
+
+    :global(.drawn-card .timeline-logo) {
+      width: 62px;
+    }
+  }
+
   @media (max-width: 900px) {
     :global(.top) {
       flex-direction: column;
-      align-items: flex-start;
+      align-items: center;
     }
     :global(.field-row) {
       grid-template-columns: 1fr;
@@ -2148,18 +2195,127 @@
     :global(.lobby-center) {
       grid-column: auto;
     }
+    :global(.team-header) {
+      flex-wrap: wrap;
+      gap: 8px;
+    }
   }
 
-  @media (max-width: 1200px) {
-    :global(.lobby-frame) {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* Mobile Horizontal / Landscape Mode Optimization */
+  @media (max-height: 560px) and (orientation: landscape) {
+    :global(.page.game-page) {
+      padding: 6px 12px 16px;
     }
-    :global(.lobby-center) {
-      grid-column: 1 / -1;
+
+    :global(.game-header) {
+      display: flex;
+      flex-direction: row !important;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
     }
+
+    :global(.logo-title.logo-small) {
+      width: 110px;
+    }
+
+    :global(.game-frame) {
+      gap: 10px;
+    }
+
+    :global(.game-hud) {
+      flex-wrap: nowrap;
+      gap: 10px;
+    }
+
+    :global(.music-player-card) {
+      grid-template-columns: 58px minmax(0, 1fr);
+      min-height: 84px;
+      padding: 6px 10px;
+      row-gap: 4px;
+      max-width: 460px;
+    }
+
+    :global(.music-player-avatar) {
+      width: 58px;
+      height: 58px;
+    }
+
+    :global(.music-player-body) {
+      gap: 3px;
+    }
+
+    :global(.music-player-title) {
+      font-size: 0.84rem;
+    }
+
+    :global(.music-player-subtitle) {
+      font-size: 0.7rem;
+    }
+
+    :global(.music-control-btn) {
+      width: 28px;
+      height: 28px;
+    }
+
+    :global(.music-control-btn-main) {
+      width: 34px;
+      height: 34px;
+    }
+
+    :global(.drawn-card) {
+      width: 88px;
+      height: 96px;
+      border-radius: 12px;
+    }
+
+    :global(.drawn-card .timeline-logo) {
+      width: 48px;
+    }
+
+    :global(.team-timelines) {
+      gap: 10px;
+    }
+
+    :global(.team-timeline) {
+      padding: 8px 12px;
+      gap: 8px;
+      border-radius: 14px;
+    }
+
     :global(.timeline-cards) {
-      --timeline-card-width: clamp(110px, 14vw, 140px);
-      --drop-hit-width: 8px;
+      --timeline-card-width: 104px;
+    }
+
+    :global(.timeline-card),
+    :global(.timeline-card.back),
+    :global(.timeline-drop) {
+      min-height: 118px;
+      padding: 6px 8px;
+      border-radius: 12px;
+    }
+
+    :global(.timeline-card.back .timeline-logo) {
+      width: 76px;
+    }
+
+    :global(.timeline-year) {
+      font-size: 22px;
+    }
+
+    :global(.timeline-artist),
+    :global(.timeline-title) {
+      font-size: 10px;
+    }
+
+    :global(.timeline-slot.drop-slot.tap-ready),
+    :global(.timeline-slot.drop-slot.has-votes) {
+      width: 38px;
+      margin-right: 8px;
+    }
+
+    :global(.timeline-slot.card-slot) {
+      margin-right: 8px;
     }
   }
 </style>

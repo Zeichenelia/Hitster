@@ -35,6 +35,21 @@
 
   const timelineSlots = 6;
   let lastReportedBrokenCardId = "";
+  let dismissRotateHint = false;
+
+  const tryLockLandscape = async () => {
+    try {
+      if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      }
+      if (screen?.orientation?.lock) {
+        await screen.orientation.lock("landscape");
+      }
+    } catch (_err) {
+      // Browser may not allow programmatic orientation lock; user can rotate manually
+    }
+    dismissRotateHint = true;
+  };
   const logoSrc = "/assets/hitster-logo.png";
   const dragType = "application/x-hitster-card";
   let drawnCardRef;
@@ -636,114 +651,128 @@
   {/if}
 
 
-  {#if displayCard}
-    <div class="music-player-card">
-      <img
-        class="music-player-avatar"
-        src={avatarLoadFailed ? logoSrc : currentAvatarSrc}
-        alt={displayCard.packName || "Playlist"}
-        on:error={() => {
-          if (avatarIndex < avatarCandidates.length - 1) {
-            avatarIndex += 1;
-            return;
-          }
-          avatarLoadFailed = true;
-        }}
-      />
-      <div class="music-player-body">
-        <h2 class="music-player-title">Card #{displayCard.cardNumber || "?"}</h2>
-        <p class="music-player-subtitle">{displayCard.packName || "Unknown Playlist"}</p>
-        <div class="music-player-controls">
-          <button class="music-control-btn" type="button" aria-label="10 Sekunden zurück" on:click={() => seekRelative(-10)}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2L7 6l5 4V7c3.3 0 6 2.7 6 6a6 6 0 0 1-6 6 6 6 0 0 1-5.7-4H4.2A8 8 0 0 0 12 21a8 8 0 0 0 0-16z"/></svg>
-            <span class="music-seek-badge">10</span>
-          </button>
-          <button class="music-control-btn music-control-btn-main" type="button" aria-label={isPaused ? "Wiedergabe" : "Pause"} on:click={togglePlayback}>
-            {#if isPaused}
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
-            {:else}
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
-            {/if}
-          </button>
-          <button class="music-control-btn" type="button" aria-label="10 Sekunden vor" on:click={() => seekRelative(10)}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2l5 4-5 4V7a6 6 0 1 0 5.7 8h2.1A8 8 0 1 1 12 5z"/></svg>
-            <span class="music-seek-badge">10</span>
-          </button>
-        </div>
-      </div>
-      <div class="music-progress-track" bind:this={seekTrackRef} role="slider" tabindex="0" aria-label="Song-Position" aria-valuemin="0" aria-valuemax={Math.max(0, Math.floor(playerDuration))} aria-valuenow={Math.max(0, Math.floor(playerCurrentTime))} on:pointerdown={handleSeekPointerDown} on:keydown={(event) => { if (event.key === "ArrowLeft") seekRelative(-10); if (event.key === "ArrowRight") seekRelative(10); }}>
-        <div class="music-progress-fill" style={`width: ${playerDuration > 0 ? (playerCurrentTime / playerDuration) * 100 : 0}%`}></div>
-      </div>
-      <div class="music-time-row">
-        <span class="music-time-display">{formatTime(playerCurrentTime)} / {formatTime(playerDuration)}</span>
-        <div class="music-volume-mixer" on:wheel|preventDefault={handleVolumeWheel}>
-          <button
-            class="music-volume-btn"
-            type="button"
-            title={isMuted || volume === 0 ? "Stummschaltung aufheben" : "Stummschalten"}
-            aria-label="Toggle mute"
-            on:click={toggleMute}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              {#if isMuted || volume === 0}
-                <path d="M3 9v6h4l5 4V5L7 9H3zm10.5 3l3-3 1.5 1.5-3 3 3 3L16.5 18l-3-3-3 3L9 16.5l3-3-3-3L10.5 9l3 3z" />
-              {:else if volume < 45}
-                <path d="M3 9v6h4l5 4V5L7 9H3zm12.5 3a3.5 3.5 0 0 0-2.05-3.18v6.36A3.5 3.5 0 0 0 15.5 12z" />
-              {:else}
-                <path d="M3 9v6h4l5 4V5L7 9H3zm12.5 3a3.5 3.5 0 0 0-2.05-3.18v6.36A3.5 3.5 0 0 0 15.5 12zm2.5 0a6 6 0 0 0-3.5-5.48v10.96A6 6 0 0 0 18 12z" />
-              {/if}
-            </svg>
-          </button>
-          <div
-            class="music-volume-slider"
-            bind:this={volumeTrackRef}
-            role="slider"
-            aria-label="Lautstärke"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            aria-valuenow={isMuted ? 0 : volume}
-            tabindex="0"
-            on:pointerdown={handleVolumePointerDown}
-            on:keydown={(event) => {
-              if (event.key === "ArrowRight" || event.key === "ArrowUp") {
-                event.preventDefault();
-                setSliderVolume((isMuted ? 0 : volume) + 2);
-              }
-              if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
-                event.preventDefault();
-                setSliderVolume((isMuted ? 0 : volume) - 2);
-              }
-            }}
-          >
-            <div class="music-volume-track"></div>
-            <div class="music-volume-fill" style={`width: ${isMuted ? 0 : volume}%`}></div>
-            <div class="music-volume-thumb" style={`left: ${isMuted ? 0 : volume}%`}></div>
-          </div>
-          <span class="music-volume-value">{isMuted ? 0 : volume}%</span>
-        </div>
+  {#if !dismissRotateHint}
+    <div class="mobile-rotate-banner">
+      <span>📱 Tipp: Dreh dein Handy quer für die beste Timeline-Ansicht</span>
+      <div class="mobile-rotate-actions">
+        <button class="ghost rotate-action-btn" type="button" on:click={tryLockLandscape}>Querformat</button>
+        <button class="ghost rotate-dismiss-btn" type="button" aria-label="Hinweis schließen" on:click={() => (dismissRotateHint = true)}>✕</button>
       </div>
     </div>
   {/if}
-  {#if currentCard}
-    <div
-      class="drawn-card"
-      bind:this={drawnCardRef}
-      draggable={isActiveTeamMember}
-      role="button"
-      tabindex="0"
-      aria-label="Drag card to timeline or click + on a slot"
-      on:dragstart={handleDragStart}
-      on:dragend={() => {
-        hoveredDrop = null;
-        if (dragGhost) {
-          dragGhost.remove();
-          dragGhost = null;
-        }
-      }}
-    >
-      <img class="timeline-logo" src={logoSrc} alt="Hitster" />
-      {#if isActiveTeamMember}
-        <span class="drawn-card-hint">Ziehen oder + klicken</span>
+
+  {#if displayCard || currentCard}
+    <div class="game-hud">
+      {#if displayCard}
+        <div class="music-player-card">
+          <img
+            class="music-player-avatar"
+            src={avatarLoadFailed ? logoSrc : currentAvatarSrc}
+            alt={displayCard.packName || "Playlist"}
+            on:error={() => {
+              if (avatarIndex < avatarCandidates.length - 1) {
+                avatarIndex += 1;
+                return;
+              }
+              avatarLoadFailed = true;
+            }}
+          />
+          <div class="music-player-body">
+            <h2 class="music-player-title">Card #{displayCard.cardNumber || "?"}</h2>
+            <p class="music-player-subtitle">{displayCard.packName || "Unknown Playlist"}</p>
+            <div class="music-player-controls">
+              <button class="music-control-btn" type="button" aria-label="10 Sekunden zurück" on:click={() => seekRelative(-10)}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2L7 6l5 4V7c3.3 0 6 2.7 6 6a6 6 0 0 1-6 6 6 6 0 0 1-5.7-4H4.2A8 8 0 0 0 12 21a8 8 0 0 0 0-16z"/></svg>
+                <span class="music-seek-badge">10</span>
+              </button>
+              <button class="music-control-btn music-control-btn-main" type="button" aria-label={isPaused ? "Wiedergabe" : "Pause"} on:click={togglePlayback}>
+                {#if isPaused}
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+                {:else}
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
+                {/if}
+              </button>
+              <button class="music-control-btn" type="button" aria-label="10 Sekunden vor" on:click={() => seekRelative(10)}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2l5 4-5 4V7a6 6 0 1 0 5.7 8h2.1A8 8 0 1 1 12 5z"/></svg>
+                <span class="music-seek-badge">10</span>
+              </button>
+            </div>
+          </div>
+          <div class="music-progress-track" bind:this={seekTrackRef} role="slider" tabindex="0" aria-label="Song-Position" aria-valuemin="0" aria-valuemax={Math.max(0, Math.floor(playerDuration))} aria-valuenow={Math.max(0, Math.floor(playerCurrentTime))} on:pointerdown={handleSeekPointerDown} on:keydown={(event) => { if (event.key === "ArrowLeft") seekRelative(-10); if (event.key === "ArrowRight") seekRelative(10); }}>
+            <div class="music-progress-fill" style={`width: ${playerDuration > 0 ? (playerCurrentTime / playerDuration) * 100 : 0}%`}></div>
+          </div>
+          <div class="music-time-row">
+            <span class="music-time-display">{formatTime(playerCurrentTime)} / {formatTime(playerDuration)}</span>
+            <div class="music-volume-mixer" on:wheel|preventDefault={handleVolumeWheel}>
+              <button
+                class="music-volume-btn"
+                type="button"
+                title={isMuted || volume === 0 ? "Stummschaltung aufheben" : "Stummschalten"}
+                aria-label="Toggle mute"
+                on:click={toggleMute}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  {#if isMuted || volume === 0}
+                    <path d="M3 9v6h4l5 4V5L7 9H3zm10.5 3l3-3 1.5 1.5-3 3 3 3L16.5 18l-3-3-3 3L9 16.5l3-3-3-3L10.5 9l3 3z" />
+                  {:else if volume < 45}
+                    <path d="M3 9v6h4l5 4V5L7 9H3zm12.5 3a3.5 3.5 0 0 0-2.05-3.18v6.36A3.5 3.5 0 0 0 15.5 12z" />
+                  {:else}
+                    <path d="M3 9v6h4l5 4V5L7 9H3zm12.5 3a3.5 3.5 0 0 0-2.05-3.18v6.36A3.5 3.5 0 0 0 15.5 12zm2.5 0a6 6 0 0 0-3.5-5.48v10.96A6 6 0 0 0 18 12z" />
+                  {/if}
+                </svg>
+              </button>
+              <div
+                class="music-volume-slider"
+                bind:this={volumeTrackRef}
+                role="slider"
+                aria-label="Lautstärke"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow={isMuted ? 0 : volume}
+                tabindex="0"
+                on:pointerdown={handleVolumePointerDown}
+                on:keydown={(event) => {
+                  if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setSliderVolume((isMuted ? 0 : volume) + 2);
+                  }
+                  if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+                    event.preventDefault();
+                    setSliderVolume((isMuted ? 0 : volume) - 2);
+                  }
+                }}
+              >
+                <div class="music-volume-track"></div>
+                <div class="music-volume-fill" style={`width: ${isMuted ? 0 : volume}%`}></div>
+                <div class="music-volume-thumb" style={`left: ${isMuted ? 0 : volume}%`}></div>
+              </div>
+              <span class="music-volume-value">{isMuted ? 0 : volume}%</span>
+            </div>
+          </div>
+        </div>
+      {/if}
+      {#if currentCard}
+        <div
+          class="drawn-card"
+          bind:this={drawnCardRef}
+          draggable={isActiveTeamMember}
+          role="button"
+          tabindex="0"
+          aria-label="Drag card to timeline or click + on a slot"
+          on:dragstart={handleDragStart}
+          on:dragend={() => {
+            hoveredDrop = null;
+            if (dragGhost) {
+              dragGhost.remove();
+              dragGhost = null;
+            }
+          }}
+        >
+          <img class="timeline-logo" src={logoSrc} alt="Hitster" />
+          {#if isActiveTeamMember}
+            <span class="drawn-card-hint">Ziehen oder + klicken</span>
+          {/if}
+        </div>
       {/if}
     </div>
   {/if}
@@ -1398,6 +1427,48 @@
     text-align: right;
     font-variant-numeric: tabular-nums;
     color: rgba(236, 240, 255, 0.8);
+  }
+
+  .mobile-rotate-banner {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: rgba(255, 59, 212, 0.14);
+    border: 1px solid rgba(255, 122, 230, 0.4);
+    color: #ffd9f0;
+    font-size: 12px;
+  }
+
+  .mobile-rotate-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .rotate-action-btn {
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+
+  .rotate-dismiss-btn {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  @media (max-width: 680px) and (orientation: portrait) {
+    .mobile-rotate-banner {
+      display: flex;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .music-volume-slider {
+      width: 68px;
+    }
   }
 </style>
 
