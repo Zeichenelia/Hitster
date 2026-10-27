@@ -17,6 +17,8 @@
   let isUnlocked = false;
   let pinChecking = false;
   let dbConnected = false;
+  let dbError = "";
+  let dbChecking = false;
 
   let statusMsg = "";
   let errorMsg = "";
@@ -68,14 +70,21 @@
   }
 
   async function checkServerStatus() {
+    dbChecking = true;
     try {
       const res = await fetch(`${apiBaseUrl}/api/playlists/status`);
       if (res.ok) {
         const data = await res.json();
         dbConnected = Boolean(data.dbConnected);
+        dbError = data.error || "";
+        if (dbConnected) {
+          dbError = "";
+        }
       }
-    } catch (_err) {
-      // Ignore
+    } catch (err) {
+      dbError = err.message || "Server nicht erreichbar";
+    } finally {
+      dbChecking = false;
     }
   }
 
@@ -435,6 +444,17 @@
         <span class="pm-db-badge" class:connected={dbConnected}>
           {dbConnected ? "🟢 MariaDB verbunden" : "💾 Lokaler Speicher"}
         </span>
+        {#if !dbConnected}
+          <button
+            class="ghost pm-tiny-btn"
+            type="button"
+            disabled={dbChecking}
+            title="Datenbank-Verbindung erneut testen"
+            on:click={checkServerStatus}
+          >
+            {dbChecking ? "Prüft..." : "Neu verbinden ↻"}
+          </button>
+        {/if}
       </div>
       <button class="ghost pm-close-btn" type="button" aria-label="Schließen" on:click={onClose}>✕</button>
     </div>
@@ -478,6 +498,12 @@
       {/if}
     </div>
 
+    {#if !dbConnected && dbError}
+      <div class="pm-alert warning">
+        <span>⚠️ Hinweis: {dbError}</span>
+        <button class="ghost pm-tiny-btn" type="button" on:click={checkServerStatus}>Erneut versuchen ↻</button>
+      </div>
+    {/if}
     {#if errorMsg}
       <div class="pm-alert error">{errorMsg}</div>
     {/if}
@@ -861,6 +887,23 @@
   .pm-small-btn {
     padding: 6px 12px !important;
     font-size: 12px !important;
+  }
+
+  .pm-tiny-btn {
+    padding: 3px 8px !important;
+    font-size: 11px !important;
+    border-radius: 999px !important;
+  }
+
+  .pm-alert.warning {
+    background: rgba(255, 179, 71, 0.16);
+    border: 1px solid rgba(255, 179, 71, 0.45);
+    color: #ffe0b2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
   }
 
   .pm-alert {

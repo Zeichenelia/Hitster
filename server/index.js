@@ -65,15 +65,25 @@ app.get("/pack-logo/:packId", (req, res) => {
   res.sendFile(logoPath);
 });
 
-app.get("/api/playlists/status", (_req, res) => {
-  res.json({ dbConnected: db.isDatabaseConnected() });
+app.get("/api/playlists/status", async (_req, res) => {
+  if (!db.isDatabaseConnected()) {
+    await db.initDatabase();
+  }
+  res.json({
+    dbConnected: db.isDatabaseConnected(),
+    error: db.getLastError(),
+  });
 });
 
-app.post("/api/playlists/verify-pin", (req, res) => {
+app.post("/api/playlists/verify-pin", async (req, res) => {
+  if (!db.isDatabaseConnected()) {
+    await db.initDatabase();
+  }
   const provided = String(req.body?.pin ?? req.headers["x-admin-pin"] ?? "").trim();
   res.json({
     valid: Boolean(provided && provided === ADMIN_PIN),
     dbConnected: db.isDatabaseConnected(),
+    error: db.getLastError(),
   });
 });
 
