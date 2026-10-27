@@ -28,6 +28,19 @@ app.get("/pack-logo/:packId", (req, res) => {
   res.sendFile(path.join(REPO_ROOT, pack.logo));
 });
 
+// Serve the built Svelte client (client/dist) when it exists, e.g. on Render.
+const CLIENT_DIST = path.join(__dirname, "..", "client", "dist");
+if (fs.existsSync(CLIENT_DIST)) {
+  app.use(express.static(CLIENT_DIST));
+  // SPA fallback: send index.html for any other GET request (e.g. invite links).
+  app.use((req, res, next) => {
+    if (req.method !== "GET" || req.path.startsWith("/socket.io")) {
+      next();
+      return;
+    }
+    res.sendFile(path.join(CLIENT_DIST, "index.html"));
+  });
+}
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {

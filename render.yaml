@@ -1,0 +1,13 @@
+# Render Blueprint: deploys the Svelte client and the Node.js/Socket.io server
+# as a single web service. See https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: hitster
+    runtime: node
+    plan: free
+    buildCommand: cd client && npm ci --include=dev && npm run build && cd ../server && npm ci
+    startCommand: cd server && npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
