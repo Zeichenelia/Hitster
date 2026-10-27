@@ -262,10 +262,11 @@
 
   async function saveEditSong(song) {
     const songKey = song.dbId || song.id;
+    const targetPackId = song.packId || selectedPackId;
     savingEdit = true;
     try {
       const res = await fetch(
-        `${apiBaseUrl}/api/playlists/${encodeURIComponent(selectedPackId)}/songs/${encodeURIComponent(songKey)}`,
+        `${apiBaseUrl}/api/playlists/${encodeURIComponent(targetPackId)}/songs/${encodeURIComponent(songKey)}`,
         {
           method: "PUT",
           headers: {
@@ -285,7 +286,11 @@
       if (!res.ok) {
         throw new Error(data.message || "Speichern fehlgeschlagen.");
       }
-      songs = data.songs || songs;
+      if (selectedPackId === "__all__") {
+        await loadSongs("__all__");
+      } else {
+        songs = data.songs || songs;
+      }
       editingSongId = null;
       showFeedback("Song aktualisiert!");
     } catch (err) {
@@ -297,9 +302,10 @@
 
   async function handleDeleteSong(song) {
     const songKey = song.dbId || song.id;
+    const targetPackId = song.packId || selectedPackId;
     try {
       const res = await fetch(
-        `${apiBaseUrl}/api/playlists/${encodeURIComponent(selectedPackId)}/songs/${encodeURIComponent(songKey)}`,
+        `${apiBaseUrl}/api/playlists/${encodeURIComponent(targetPackId)}/songs/${encodeURIComponent(songKey)}`,
         {
           method: "DELETE",
           headers: { "x-admin-pin": pin },
@@ -309,7 +315,11 @@
       if (!res.ok) {
         throw new Error(data.message || "Löschen fehlgeschlagen.");
       }
-      songs = data.songs || songs;
+      if (selectedPackId === "__all__") {
+        await loadSongs("__all__");
+      } else {
+        songs = data.songs || songs;
+      }
       if (data.packs) {
         onPacksUpdated(data.packs);
       }
@@ -410,6 +420,8 @@
     reader.readAsText(file, "utf-8");
   }
 
+  $: totalSongsAcrossPacks = packs.reduce((sum, p) => sum + (Number(p.songCount) || 0), 0);
+
   $: filteredSongs = songs.filter((song) => {
     if (filterBrokenOnly && !song.isBroken) {
       return false;
@@ -419,7 +431,8 @@
     return (
       String(song.artist || "").toLowerCase().includes(q) ||
       String(song.title || "").toLowerCase().includes(q) ||
-      String(song.year || "").includes(q)
+      String(song.year || "").includes(q) ||
+      String(song.packName || "").toLowerCase().includes(q)
     );
   });
 
@@ -533,15 +546,26 @@
     {#if activeTab === "manage"}
       <div class="pm-toolbar">
         <div class="pm-pack-select-row">
-          <label for="pm-pack-select">Playlist:</label>
+          <label for="pm-pack-select">Ansicht:</label>
           <select id="pm-pack-select" bind:value={selectedPackId}>
+            <option value="__all__">🔍 Alle Playlists durchsuchen ({totalSongsAcrossPacks} Songs)</option>
             {#each packs as pack}
               <option value={pack.id}>
                 {pack.name} ({pack.songCount ?? "?"} Songs)
               </option>
             {/each}
           </select>
-          {#if isUnlocked && selectedPackId}
+          {#if selectedPackId !== "__all__"}
+            <button
+              class="ghost pm-small-btn"
+              type="button"
+              title="In allen Playlists suchen"
+              on:click={() => (selectedPackId = "__all__")}
+            >
+              🔍 Alle durchsuchen
+            </button>
+          {/if}
+          {#if isUnlocked && selectedPackId && selectedPackId !== "__all__"}
             <button
               class="ghost pm-danger-btn"
               type="button"
@@ -554,7 +578,7 @@
         </div>
       </div>
 
-      {#if isUnlocked}
+      {#if isUnlocked && selectedPackId !== "__all__"}
         <div class="pm-add-card">
           <div class="pm-add-header">
             <strong>+ Song zu dieser Playlist hinzufügen</strong>
@@ -677,6 +701,16 @@
               {:else}
                 <div class="pm-song-info">
                   <span class="pm-year-badge">{song.year || "????"}</span>
+                  {#if selectedPackId === "__all__" && song.packName}
+                    <button
+                      type="button"
+                      class="pm-pack-tag"
+                      title="Zu dieser Playlist wechseln"
+                      on:click={() => (selectedPackId = song.packId)}
+                    >
+                      {song.packName}
+                    </button>
+                  {/if}
                   <div class="pm-song-text">
                     <strong>{song.artist || "Unbekannt"}</strong>
                     <span>– {song.title || "Unbekannt"}</span>
@@ -1105,6 +1139,22 @@
     gap: 6px;
     flex-wrap: wrap;
     min-width: 0;
+  }
+
+  .pm-pack-tag {
+    padding: 2px 8px !important;
+    border-radius: 999px !important;
+    background: rgba(61, 240, 255, 0.12) !important;
+    border: 1px solid rgba(61, 240, 255, 0.35) !important;
+    color: #bff8ff !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .pm-pack-tag:hover {
+    background: rgba(61, 240, 255, 0.24) !important;
   }
 
   .pm-broken-tag {

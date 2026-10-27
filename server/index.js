@@ -88,6 +88,13 @@ app.post("/api/playlists/verify-pin", async (req, res) => {
 });
 
 app.get("/api/playlists/:packId/songs", (req, res) => {
+  if (req.params.packId === "__all__") {
+    res.json({
+      pack: { id: "__all__", name: "Alle Playlists" },
+      songs: db.getAllSongs(),
+    });
+    return;
+  }
   const pack = db.getPack(req.params.packId);
   if (!pack) {
     res.status(404).json({ code: "PACK_NOT_FOUND", message: "Playlist nicht gefunden." });

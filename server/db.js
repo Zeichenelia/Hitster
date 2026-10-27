@@ -404,7 +404,25 @@ function getPack(packId) {
 }
 
 function getSongsForPack(packId) {
-  return songsByPack.get(packId) || [];
+  const packName = packIndex.get(packId)?.name || packId;
+  return (songsByPack.get(packId) || []).map((s) => ({
+    ...s,
+    packName,
+  }));
+}
+
+function getAllSongs() {
+  const all = [];
+  for (const [packId, songs] of songsByPack.entries()) {
+    const packName = packIndex.get(packId)?.name || packId;
+    for (const song of songs) {
+      all.push({
+        ...song,
+        packName,
+      });
+    }
+  }
+  return all;
 }
 
 function loadDeckFromPacks(packIds) {
@@ -672,6 +690,7 @@ module.exports = {
   getAllPacks,
   getPack,
   getSongsForPack,
+  getAllSongs,
   loadDeckFromPacks,
   createPlaylist,
   deletePlaylist,
