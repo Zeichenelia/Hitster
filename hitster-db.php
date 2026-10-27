@@ -9,7 +9,7 @@
 // =============================================================================
 // KONFIGURATION
 // =============================================================================
-define('DB_HOST', '127.0.0.1');
+define('DB_HOST', '62.108.32.155');
 define('DB_PORT', 3306);
 define('DB_NAME', 'yufhqmko_songster_db');
 define('DB_USER', 'yufhqmko_songster');
