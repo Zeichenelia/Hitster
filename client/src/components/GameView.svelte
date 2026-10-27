@@ -1023,10 +1023,18 @@
                     {/if}
                     <span
                       class="bonus-chip"
-                      class:ready={Boolean(draftArtist.trim()) && (!requiresTitleGuess || Boolean(draftTitle.trim()))}
-                      title="Bonuspunkt bei richtigem Tipp"
+                      class:ready={Boolean(draftArtist.trim()) || (requiresTitleGuess && Boolean(draftTitle.trim()))}
+                      title={requiresTitleGuess ? "+1 Punkt je richtigem Tipp (Interpret / Titel)" : "+1 Bonuspunkt bei richtigem Interpreten"}
                     >
-                      {#if Boolean(draftArtist.trim()) && (!requiresTitleGuess || Boolean(draftTitle.trim()))}
+                      {#if requiresTitleGuess}
+                        {#if Boolean(draftArtist.trim()) && Boolean(draftTitle.trim())}
+                          ✓ +2
+                        {:else if Boolean(draftArtist.trim()) || Boolean(draftTitle.trim())}
+                          ✓ +1 / +2
+                        {:else}
+                          +2 Bonus
+                        {/if}
+                      {:else if Boolean(draftArtist.trim())}
                         ✓ +1
                       {:else}
                         +1 Bonus
@@ -1045,7 +1053,7 @@
                     {:else}
                       <span class="bonus-spectator-muted">Bonustipp offen</span>
                     {/if}
-                    <span class="bonus-chip">+1</span>
+                    <span class="bonus-chip">{requiresTitleGuess ? "+2" : "+1"}</span>
                   </div>
                 {/if}
               {/if}

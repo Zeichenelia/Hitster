@@ -322,7 +322,7 @@ function evaluateBonusGuess(rules, card, guess) {
   if (mode === "year+artist+title") {
     const titleCorrect = checkTitleGuess(titleGuess, card.title);
     return {
-      bonusPoints: artistCorrect && titleCorrect ? 1 : 0,
+      bonusPoints: (artistCorrect ? 1 : 0) + (titleCorrect ? 1 : 0),
       artistCorrect,
       titleCorrect,
       hadGuess: Boolean(artistGuess || titleGuess),

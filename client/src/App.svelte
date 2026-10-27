@@ -369,16 +369,20 @@
       if (!payload.hadPlacement) {
         showToast("⏱ Zeit abgelaufen! Keine Karte platziert.");
       } else if (payload.bonusPoints > 0) {
-        showToast("⏱ Zeit abgelaufen – Karte eingeloggt & +1 Bonuspunkt!");
+        showToast(
+          `⏱ Zeit abgelaufen – Karte eingeloggt & +${payload.bonusPoints} Bonuspunkt${payload.bonusPoints > 1 ? "e" : ""}!`
+        );
       } else {
         showToast("⏱ Zeit abgelaufen – platzierte Karte wurde automatisch eingeloggt!");
       }
     } else if (payload.bonusPoints > 0) {
-      showToast(
-        rules?.guessMode === "year+artist+title"
-          ? "🎯 +1 Bonuspunkt für Interpret & Titel!"
-          : "🎯 +1 Bonuspunkt für richtigen Interpreten!"
-      );
+      if (payload.bonusPoints === 2) {
+        showToast("🎯 +2 Bonuspunkte für Interpret & Titel!");
+      } else if (payload.artistCorrect) {
+        showToast("🎯 +1 Bonuspunkt für richtigen Interpreten!");
+      } else {
+        showToast("🎯 +1 Bonuspunkt für richtigen Songtitel!");
+      }
     } else if (payload.hadGuess && rules?.guessMode && rules.guessMode !== "year") {
       const answerLabel =
         rules.guessMode === "year+artist+title"
