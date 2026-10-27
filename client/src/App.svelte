@@ -45,6 +45,7 @@
   let lastPlacedTeamId = "";
   let autoPlacedCardId = "";
   let pendingPlacement = null;
+  let slotVotes = [];
   let audioUrl = "";
   let audioState = null;
   let leftTeams = [];
@@ -222,6 +223,7 @@
     }
     remainingCards = payload.remainingCards ?? remainingCards;
     pendingPlacement = payload.pendingPlacement || null;
+    slotVotes = payload.slotVotes || [];
     if (payload.audioState) {
       audioState = payload.audioState;
     }
@@ -254,6 +256,7 @@
     lastRevealTeamId = "";
     lastPlacedCardId = "";
     lastPlacedTeamId = "";
+    slotVotes = [];
     autoPlacedCardId = "";
     winnerTeamId = "";
     showWinner = false;
@@ -275,6 +278,7 @@
     audioUrl = payload.card?.url || "";
     remainingCards = payload.remainingCards ?? remainingCards;
     pendingPlacement = null;
+    slotVotes = [];
     audioState = payload.audioState || null;
   });
 
@@ -285,6 +289,7 @@
     audioUrl = payload.card?.url || "";
     remainingCards = payload.remainingCards ?? remainingCards;
     pendingPlacement = null;
+    slotVotes = [];
     audioState = payload.audioState || null;
     if (payload.autoSkipped) {
       showToast("Video nicht verfügbar – neuer Song wurde automatisch gezogen.");
@@ -320,6 +325,10 @@
     };
   });
 
+  socket.on("game:slot-votes", (payload) => {
+    slotVotes = payload.slotVotes || [];
+  });
+
   socket.on("game:card-revealed", (payload) => {
     activeTeamId = payload.activeTeamId || activeTeamId;
     remainingCards = payload.remainingCards ?? remainingCards;
@@ -336,6 +345,7 @@
     lastPlacedTeamId = payload.correct ? payload.teamId || "" : "";
     autoPlacedCardId = "";
     pendingPlacement = null;
+    slotVotes = [];
     if (payload.audioState) {
       audioState = payload.audioState;
     }
@@ -590,6 +600,17 @@
     });
   }
 
+  function voteSlot(position) {
+    if (!roomCode || !activeTeamId || !currentCard) {
+      return;
+    }
+    socket.emit("game:vote-slot", {
+      roomCode,
+      teamId: activeTeamId,
+      position,
+    });
+  }
+
   function syncAudioState(partial = {}) {
     if (!roomCode) {
       return;
@@ -743,11 +764,13 @@
       {lastRevealPosition}
       {lastRevealTeamId}
       {pendingPlacement}
+      {slotVotes}
       {socketId}
       {clientId}
       {playerColors}
       onNextTurn={nextTurn}
       onPlaceCard={placeCard}
+      onVoteSlot={voteSlot}
       onRevealCard={revealCard}
       onJoinTeam={joinTeam}
       onRenameTeam={renameTeam}
@@ -1546,8 +1569,9 @@
     transition: width 0.4s var(--springy-ease), margin-right 0.4s var(--springy-ease);
   }
 
-  :global(.timeline-slot.drop-slot.tap-ready) {
-    width: 36px;
+  :global(.timeline-slot.drop-slot.tap-ready),
+  :global(.timeline-slot.drop-slot.has-votes) {
+    width: 42px;
     margin-right: 12px;
   }
 
@@ -1572,7 +1596,8 @@
       transform 1s var(--springy-ease);
   }
 
-  :global(.timeline-slot.drop-slot.tap-ready .timeline-drop) {
+  :global(.timeline-slot.drop-slot.tap-ready .timeline-drop),
+  :global(.timeline-slot.drop-slot.has-votes .timeline-drop) {
     opacity: 0.88;
     transform: scale(1);
     cursor: pointer;

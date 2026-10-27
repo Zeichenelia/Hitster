@@ -138,6 +138,7 @@ function serializeRoomState(room) {
     audioState: room.audioState || null,
     remainingCards: room.deck.length,
     pendingPlacement: room.pendingPlacement || null,
+    slotVotes: Object.values(room.slotVotes || {}),
   };
 }
 
@@ -267,6 +268,7 @@ function createRoom(code, hostId, hostName) {
         audioSyncAuthorityUpdatedAt: 0,
         pendingPlacement: null,
         pendingDiscard: null,
+        slotVotes: {},
         activeTeamId: null,
         turnOrder: [],
         turnIndex: 0,
@@ -739,6 +741,7 @@ io.on("connection", (socket) => {
     room.audioSyncAuthorityId = null;
     room.audioSyncAuthorityUpdatedAt = 0;
     room.pendingDiscard = null;
+    room.slotVotes = {};
 
     for (const team of room.teams.values()) {
       team.score = 0;
@@ -799,6 +802,7 @@ io.on("connection", (socket) => {
     room.currentCard = null;
     room.pendingPlacement = null;
     room.pendingDiscard = null;
+    room.slotVotes = {};
     room.audioState = null;
     room.audioSyncAuthorityId = null;
     room.audioSyncAuthorityUpdatedAt = 0;
@@ -844,6 +848,7 @@ io.on("connection", (socket) => {
     room.currentCard = null;
     room.pendingPlacement = null;
     room.pendingDiscard = null;
+    room.slotVotes = {};
     room.audioState = null;
     room.audioSyncAuthorityId = null;
     room.audioSyncAuthorityUpdatedAt = 0;
@@ -884,6 +889,7 @@ io.on("connection", (socket) => {
     }
 
     room.pendingPlacement = null;
+    room.slotVotes = {};
     room.discard.push(room.currentCard);
 
     if (room.deck.length === 0) {
@@ -934,6 +940,7 @@ io.on("connection", (socket) => {
 
     room.discard.push(room.currentCard);
     room.pendingPlacement = null;
+    room.slotVotes = {};
 
     const nextCard = drawValidCard(room);
     if (!nextCard) {
@@ -996,8 +1003,10 @@ io.on("connection", (socket) => {
     if (room.pendingDiscard) {
       room.discard.push(room.pendingDiscard);
       room.pendingDiscard = null;
+    room.slotVotes = {};
     }
 
+    room.slotVotes = {};
     const nextCard = drawValidCard(room);
     if (nextCard) {
       room.currentCard = nextCard;
@@ -1083,6 +1092,49 @@ io.on("connection", (socket) => {
     broadcastRoomState(roomCode, room);
   });
 
+  socket.on("game:vote-slot", ({ roomCode, teamId, position } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room || room.state !== "playing" || !room.currentCard) {
+      return;
+    }
+    const requestingPlayer = room.players.get(socket.id);
+    if (!requestingPlayer || requestingPlayer.teamId !== room.activeTeamId) {
+      return;
+    }
+    if (teamId !== room.activeTeamId) {
+      return;
+    }
+    const team = room.teams.get(teamId);
+    if (!team) {
+      return;
+    }
+    const timeline = team.timeline || [];
+    if (timeline.length === 0) {
+      return;
+    }
+    const index = Math.max(0, Math.min(Number(position) || 0, timeline.length));
+    if (!room.slotVotes) {
+      room.slotVotes = {};
+    }
+    const voteKey = requestingPlayer.clientId || socket.id;
+    const existingVote = room.slotVotes[voteKey];
+    if (existingVote && existingVote.position === index && existingVote.teamId === teamId) {
+      delete room.slotVotes[voteKey];
+    } else {
+      room.slotVotes[voteKey] = {
+        playerId: socket.id,
+        clientId: requestingPlayer.clientId || "",
+        playerName: requestingPlayer.name || "Player",
+        teamId,
+        position: index,
+      };
+    }
+    io.to(roomCode).emit("game:slot-votes", {
+      slotVotes: Object.values(room.slotVotes),
+    });
+    broadcastRoomState(roomCode, room);
+  });
+
   socket.on("game:reveal-card", ({ roomCode } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) {
@@ -1137,6 +1189,7 @@ io.on("connection", (socket) => {
     room.currentCard = null;
     room.audioState = room.audioState?.videoId ? room.audioState : createAudioState(revealedCard);
     room.pendingPlacement = null;
+    room.slotVotes = {};
     room.turnIndex = (room.turnIndex + 1) % room.turnOrder.length;
     room.activeTeamId = room.turnOrder[room.turnIndex];
 

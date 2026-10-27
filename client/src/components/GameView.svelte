@@ -16,11 +16,13 @@
   export let lastRevealPosition = -1;
   export let lastRevealTeamId = "";
   export let pendingPlacement = null;
+  export let slotVotes = [];
   export let socketId = "";
   export let clientId = "";
   export let playerColors = {};
   export let onNextTurn = () => {};
   export let onPlaceCard = () => {};
+  export let onVoteSlot = () => {};
   export let onRevealCard = () => {};
   export let onJoinTeam = () => {};
   export let onRenameTeam = () => {};
@@ -159,13 +161,34 @@
     onPlaceCard(position);
   };
 
-  const handleTapPlace = (teamId, position) => {
+  const getInitials = (name) => {
+    const cleaned = String(name || "").trim();
+    if (!cleaned) {
+      return "?";
+    }
+    const parts = cleaned.split(/\s+/u);
+    if (parts.length >= 2) {
+      return `${parts[0][0] || ""}${parts[parts.length - 1][0] || ""}`.toUpperCase();
+    }
+    return cleaned.slice(0, 2).toUpperCase();
+  };
+
+  const getVotesForSlot = (allVotes, teamId, position) =>
+    (allVotes || []).filter(
+      (vote) => vote && vote.teamId === teamId && Number(vote.position) === position
+    );
+
+  const handleSlotClick = (teamId, position) => {
     if (!currentCard || myTeamId !== activeTeamId || teamId !== activeTeamId) {
       return;
     }
-    hoveredDrop = null;
-    tapSelectActive = false;
-    onPlaceCard(position);
+    if (tapSelectActive) {
+      hoveredDrop = null;
+      tapSelectActive = false;
+      onPlaceCard(position);
+      return;
+    }
+    onVoteSlot(position);
   };
 
   const handleDragOver = (event, teamId, position) => {
@@ -808,43 +831,64 @@
                     hoveredDrop &&
                     hoveredDrop.teamId === team.id &&
                     hoveredDrop.position === position}
+                  {@const isPendingHere =
+                    Boolean(pendingPlacement) &&
+                    team.id === pendingPlacement.teamId &&
+                    position === pendingPlacement.position}
+                  {@const slotVoteList = getVotesForSlot(slotVotes, team.id, position)}
                   {@const canTapSlot =
                     isActiveTeamMember &&
                     Boolean(currentCard) &&
                     team.id === activeTeamId &&
-                    (!pendingPlacement || pendingPlacement.position !== position)}
+                    !isPendingHere}
                   <div
                     class="timeline-slot drop-slot"
                     class:tap-ready={canTapSlot}
+                    class:has-votes={!isPendingHere && slotVoteList.length > 0}
                     class:show-drop={isHover || (tapSelectActive && canTapSlot)}
                   >
                     <div
                       class="timeline-drop"
                       class:active={isHover || (tapSelectActive && canTapSlot)}
+                      class:voted={slotVoteList.length > 0}
                       role="button"
                       tabindex={canTapSlot ? 0 : -1}
-                      aria-label="Place card here"
-                      on:click={() => handleTapPlace(team.id, position)}
+                      aria-label={tapSelectActive ? "Place card here" : "Vote for this slot"}
+                      title={tapSelectActive ? "Karte hier platzieren" : "Für diesen Slot abstimmen"}
+                      on:click={() => handleSlotClick(team.id, position)}
                       on:keydown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
-                          handleTapPlace(team.id, position);
+                          handleSlotClick(team.id, position);
                         }
                       }}
                       on:dragover={(event) => handleDragOver(event, team.id, position)}
                       on:dragleave={(event) => handleDragLeave(event, team.id, position)}
                       on:drop={(event) => handleDrop(event, team.id, position)}
                     >
+                      {#if slotVoteList.length > 0}
+                        <div class="slot-votes">
+                          {#each slotVoteList as vote}
+                            <span
+                              class="slot-vote-badge"
+                              title={vote.playerName}
+                              style={`--voter-glow: ${playerColors[vote.playerId] || "#3df0ff"}`}
+                            >
+                              {getInitials(vote.playerName)}
+                            </span>
+                          {/each}
+                        </div>
+                      {/if}
                       <span class="timeline-drop-label">
                         {#if isHover || (tapSelectActive && canTapSlot)}
                           Drop here
-                        {:else}
+                        {:else if slotVoteList.length === 0}
                           +
                         {/if}
                       </span>
                     </div>
                   </div>
-                  {#if pendingPlacement && team.id === pendingPlacement.teamId && position === pendingPlacement.position}
+                  {#if isPendingHere}
                     <div class="timeline-slot card-slot pending-slot">
                       {#if isActiveTeamMember}
                         <button class="primary lock-in-button" on:click={onRevealCard}>Lock in</button>
@@ -877,6 +921,19 @@
                         }}
                       >
                         <img class="timeline-logo" src={logoSrc} alt="Hitster" />
+                        {#if slotVoteList.length > 0}
+                          <div class="slot-votes pending-card-votes">
+                            {#each slotVoteList as vote}
+                              <span
+                                class="slot-vote-badge"
+                                title={vote.playerName}
+                                style={`--voter-glow: ${playerColors[vote.playerId] || "#3df0ff"}`}
+                              >
+                                {getInitials(vote.playerName)}
+                              </span>
+                            {/each}
+                          </div>
+                        {/if}
                       </div>
                     </div>
                   {:else if !lastRevealCorrect && lastRevealedCard && team.id === lastRevealTeamId && position === lastRevealPosition}
@@ -1124,6 +1181,54 @@
 
   .pill-kick-btn:hover {
     background: rgba(255, 80, 110, 0.42);
+  }
+
+  .slot-votes {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 4px 2px;
+    z-index: 2;
+  }
+
+  .pending-card-votes {
+    flex-direction: row;
+    flex-wrap: wrap;
+    position: absolute;
+    bottom: 8px;
+    left: 6px;
+    right: 6px;
+  }
+
+  .slot-vote-badge {
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--voter-glow, #3df0ff), #0b0b0f 74%);
+    border: 1.5px solid color-mix(in srgb, var(--voter-glow, #3df0ff), #ffffff 28%);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--voter-glow, #3df0ff), transparent 35%);
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    animation: votePop 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes votePop {
+    from {
+      transform: scale(0.5);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
   }
 </style>
 
