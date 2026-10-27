@@ -10,6 +10,9 @@ const packIndex = new Map();
 const songsByPack = new Map();
 let pool = null;
 let dbEnabled = false;
+let bridgeMode = false;
+let bridgeUrl = "";
+let bridgeSecret = "";
 
 function slugifyPackId(name) {
   const base = String(name || "playlist")
@@ -137,13 +140,113 @@ function savePackToDisk(packId) {
   }
 }
 
+async function callBridge(action, payload = {}) {
+  const url = `${bridgeUrl}?action=${encodeURIComponent(action)}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Bridge-Secret": bridgeSecret,
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok || data.success === false) {
+    throw new Error(data.error || `Bridge Fehler (${res.status})`);
+  }
+  return data;
+}
+
+async function reloadFromBridge() {
+  const data = await callBridge("get_all");
+  const playlistRows = data.playlists || [];
+  const songRows = data.songs || [];
+
+  const groupedSongs = new Map();
+  for (const row of songRows) {
+    if (!groupedSongs.has(row.pack_id)) {
+      groupedSongs.set(row.pack_id, []);
+    }
+    const list = groupedSongs.get(row.pack_id);
+    const cardNumber = row.card_number || String(list.length + 1).padStart(3, "0");
+    list.push({
+      id: `${row.pack_id}-${row.id}`,
+      dbId: row.id,
+      packId: row.pack_id,
+      cardNumber,
+      title: row.title || "",
+      artist: row.artist || "",
+      year: Number.parseInt(row.release_year, 10) || 0,
+      url: row.url || "",
+      youtubeTitle: row.youtube_title || "",
+      isrc: row.isrc || "",
+      isBroken: Boolean(row.is_broken),
+    });
+  }
+
+  packIndex.clear();
+  songsByPack.clear();
+
+  for (const row of playlistRows) {
+    const songs = groupedSongs.get(row.id) || [];
+    songsByPack.set(row.id, songs);
+    packIndex.set(row.id, {
+      id: row.id,
+      name: row.name,
+      file: row.file_path || `data/playlists/${row.id}.csv`,
+      logo: row.logo || "",
+      songCount: songs.length,
+      sortOrder: Number.parseInt(row.sort_order, 10) || 0,
+    });
+  }
+}
+
 async function initDatabase() {
   loadFromDisk();
+
+  bridgeUrl = process.env.DB_BRIDGE_URL || "";
+  bridgeSecret = process.env.DB_BRIDGE_SECRET || "";
+
+  if (bridgeUrl && bridgeSecret) {
+    console.log(`[DB] Attempting connection via PHP Bridge (${bridgeUrl})...`);
+    try {
+      const initRes = await callBridge("init");
+      const existingIds = new Set(initRes.existingIds || []);
+
+      for (const [packId, pack] of packIndex.entries()) {
+        if (!existingIds.has(packId)) {
+          const diskSongs = songsByPack.get(packId) || [];
+          console.log(`[DB-Bridge] Seeding playlist "${pack.name}" (${diskSongs.length} songs)...`);
+          const chunkSize = 100;
+          for (let i = 0; i < diskSongs.length; i += chunkSize) {
+            const chunk = diskSongs.slice(i, i + chunkSize);
+            await callBridge("seed_playlist", {
+              pack: i === 0 ? pack : { id: pack.id },
+              songs: chunk,
+            });
+          }
+          if (diskSongs.length === 0) {
+            await callBridge("seed_playlist", { pack, songs: [] });
+          }
+        }
+      }
+
+      await reloadFromBridge();
+      dbEnabled = true;
+      bridgeMode = true;
+      console.log(`[DB] Connected to MariaDB via PHP Bridge (${packIndex.size} playlists active).`);
+      return;
+    } catch (err) {
+      console.error("[DB] PHP Bridge connection failed:", err.message);
+      dbEnabled = false;
+      bridgeMode = false;
+    }
+  }
 
   const dbUrl = process.env.DATABASE_URL || "";
   const dbHost = process.env.DB_HOST || "";
   if (!dbUrl && !dbHost) {
-    console.log("[DB] No DB_HOST or DATABASE_URL set — using local CSV files.");
+    console.log("[DB] No DB_BRIDGE_URL or DB_HOST set — using local CSV files.");
     return;
   }
 
@@ -331,7 +434,13 @@ async function createPlaylist({ name, logo = "", csvText = "" }) {
 
   const initialSongs = csvText ? parseCsvSongs(csvText, packId) : [];
 
-  if (dbEnabled && pool) {
+  if (bridgeMode) {
+    await callBridge("create_playlist", {
+      pack: newPack,
+      songs: initialSongs,
+    });
+    await reloadFromBridge();
+  } else if (dbEnabled && pool) {
     await pool.query(
       "INSERT INTO playlists (id, name, logo, file_path, sort_order) VALUES (?, ?, ?, ?, ?)",
       [newPack.id, newPack.name, newPack.logo, newPack.file, newPack.sortOrder]
@@ -371,7 +480,10 @@ async function deletePlaylist(packId) {
   if (!packIndex.has(packId)) {
     throw new Error("Playlist not found");
   }
-  if (dbEnabled && pool) {
+  if (bridgeMode) {
+    await callBridge("delete_playlist", { packId });
+    await reloadFromBridge();
+  } else if (dbEnabled && pool) {
     await pool.query("DELETE FROM songs WHERE pack_id = ?", [packId]);
     await pool.query("DELETE FROM playlists WHERE id = ?", [packId]);
     await reloadFromDatabase();
@@ -412,7 +524,10 @@ async function addSongsToPlaylist(packId, newSongsInput) {
     throw new Error("Bitte Titel, Interpret, gültiges Jahr und YouTube-URL angeben.");
   }
 
-  if (dbEnabled && pool) {
+  if (bridgeMode) {
+    await callBridge("add_songs", { packId, songs: prepared });
+    await reloadFromBridge();
+  } else if (dbEnabled && pool) {
     const values = prepared.map((s) => [
       packId,
       s.cardNumber,
@@ -460,7 +575,18 @@ async function updateSong(packId, songId, updates) {
   const nextUrl = updates.url !== undefined ? String(updates.url).trim() : song.url;
   const nextBroken = updates.isBroken !== undefined ? Boolean(updates.isBroken) : false;
 
-  if (dbEnabled && pool && song.dbId) {
+  if (bridgeMode && song.dbId) {
+    await callBridge("update_song", {
+      songId: song.dbId,
+      packId,
+      title: nextTitle,
+      artist: nextArtist,
+      year: nextYear,
+      url: nextUrl,
+      isBroken: nextBroken,
+    });
+    await reloadFromBridge();
+  } else if (dbEnabled && pool && song.dbId) {
     await pool.query(
       "UPDATE songs SET title = ?, artist = ?, release_year = ?, url = ?, is_broken = ? WHERE id = ? AND pack_id = ?",
       [nextTitle.slice(0, 255), nextArtist.slice(0, 255), nextYear, nextUrl.slice(0, 512), nextBroken ? 1 : 0, song.dbId, packId]
@@ -489,7 +615,10 @@ async function deleteSong(packId, songId) {
   }
   const target = songs[index];
 
-  if (dbEnabled && pool && target.dbId) {
+  if (bridgeMode && target.dbId) {
+    await callBridge("delete_song", { songId: target.dbId, packId });
+    await reloadFromBridge();
+  } else if (dbEnabled && pool && target.dbId) {
     await pool.query("DELETE FROM songs WHERE id = ? AND pack_id = ?", [target.dbId, packId]);
     await reloadFromDatabase();
   } else {
@@ -512,11 +641,17 @@ async function markSongBroken(card) {
   const match = songs.find((s) => s.id === card.id || (card.dbId && s.dbId === card.dbId));
   if (match) {
     match.isBroken = true;
-    if (dbEnabled && pool && match.dbId) {
+    if (bridgeMode && match.dbId) {
+      try {
+        await callBridge("mark_broken", { songId: match.dbId });
+      } catch (_err) {
+        // Non-critical
+      }
+    } else if (dbEnabled && pool && match.dbId) {
       try {
         await pool.query("UPDATE songs SET is_broken = 1 WHERE id = ?", [match.dbId]);
       } catch (_err) {
-        // Ignore non-critical error
+        // Non-critical
       }
     }
   }
