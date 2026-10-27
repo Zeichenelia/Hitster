@@ -939,70 +939,122 @@
               </div>
             </div>
             <div class="team-header-actions">
+              {#if team.id === activeTeamId && currentCard && isBonusGuessMode}
+                {#if isActiveTeamMember}
+                  <div
+                    class="bonus-capsule"
+                    class:is-focused={Boolean(editingBonusField)}
+                    class:is-filled={Boolean(draftArtist.trim()) && (!requiresTitleGuess || Boolean(draftTitle.trim()))}
+                  >
+                    <div class="bonus-field">
+                      <svg class="bonus-icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
+                      </svg>
+                      <input
+                        class="bonus-capsule-input"
+                        type="text"
+                        maxlength="120"
+                        placeholder="Interpret..."
+                        aria-label="Interpret eingeben"
+                        bind:value={draftArtist}
+                        on:focus={() => (editingBonusField = "artist")}
+                        on:blur={() => {
+                          if (editingBonusField === "artist") editingBonusField = "";
+                        }}
+                        on:input={handleBonusInput}
+                        on:keydown={(event) => {
+                          if (event.key === "Enter" && pendingPlacement && team.id === pendingPlacement.teamId) {
+                            handleLockIn();
+                          }
+                        }}
+                      />
+                      {#if draftArtist}
+                        <button
+                          class="bonus-clear-btn"
+                          type="button"
+                          aria-label="Interpret löschen"
+                          on:click={() => {
+                            draftArtist = "";
+                            handleBonusInput();
+                          }}
+                        >
+                          ✕
+                        </button>
+                      {/if}
+                    </div>
+                    {#if requiresTitleGuess}
+                      <span class="bonus-divider" aria-hidden="true"></span>
+                      <div class="bonus-field">
+                        <svg class="bonus-icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z" />
+                        </svg>
+                        <input
+                          class="bonus-capsule-input"
+                          type="text"
+                          maxlength="120"
+                          placeholder="Songtitel..."
+                          aria-label="Songtitel eingeben"
+                          bind:value={draftTitle}
+                          on:focus={() => (editingBonusField = "title")}
+                          on:blur={() => {
+                            if (editingBonusField === "title") editingBonusField = "";
+                          }}
+                          on:input={handleBonusInput}
+                          on:keydown={(event) => {
+                            if (event.key === "Enter" && pendingPlacement && team.id === pendingPlacement.teamId) {
+                              handleLockIn();
+                            }
+                          }}
+                        />
+                        {#if draftTitle}
+                          <button
+                            class="bonus-clear-btn"
+                            type="button"
+                            aria-label="Titel löschen"
+                            on:click={() => {
+                              draftTitle = "";
+                              handleBonusInput();
+                            }}
+                          >
+                            ✕
+                          </button>
+                        {/if}
+                      </div>
+                    {/if}
+                    <span
+                      class="bonus-chip"
+                      class:ready={Boolean(draftArtist.trim()) && (!requiresTitleGuess || Boolean(draftTitle.trim()))}
+                      title="Bonuspunkt bei richtigem Tipp"
+                    >
+                      {#if Boolean(draftArtist.trim()) && (!requiresTitleGuess || Boolean(draftTitle.trim()))}
+                        ✓ +1
+                      {:else}
+                        +1 Bonus
+                      {/if}
+                    </span>
+                  </div>
+                {:else}
+                  <div class="bonus-spectator-pill" class:has-text={Boolean(draftArtist || draftTitle)}>
+                    <svg class="bonus-icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
+                    </svg>
+                    {#if draftArtist || (requiresTitleGuess && draftTitle)}
+                      <span class="bonus-spectator-text">
+                        <strong>{draftArtist || "?"}</strong>{#if requiresTitleGuess} · <strong>{draftTitle || "?"}</strong>{/if}
+                      </span>
+                    {:else}
+                      <span class="bonus-spectator-muted">Bonustipp offen</span>
+                    {/if}
+                    <span class="bonus-chip">+1</span>
+                  </div>
+                {/if}
+              {/if}
               {#if !myTeamId}
                 <button class="ghost" on:click={() => onJoinTeam(team.id)}>Join</button>
               {/if}
               <span class="score-badge">{team.score ?? 0}</span>
             </div>
           </div>
-          {#if team.id === activeTeamId && currentCard && isBonusGuessMode}
-            <div class="bonus-guess-bar">
-              <div class="bonus-guess-label">
-                <span class="bonus-badge">🎯 +1 Bonus</span>
-                <span>{requiresTitleGuess ? "Interpret & Titel" : "Interpret"}</span>
-              </div>
-              {#if isActiveTeamMember}
-                <div class="bonus-guess-inputs">
-                  <input
-                    class="bonus-guess-input"
-                    type="text"
-                    maxlength="120"
-                    placeholder="Interpret eingeben..."
-                    bind:value={draftArtist}
-                    on:focus={() => (editingBonusField = "artist")}
-                    on:blur={() => {
-                      if (editingBonusField === "artist") editingBonusField = "";
-                    }}
-                    on:input={handleBonusInput}
-                    on:keydown={(event) => {
-                      if (event.key === "Enter" && pendingPlacement && team.id === pendingPlacement.teamId) {
-                        handleLockIn();
-                      }
-                    }}
-                  />
-                  {#if requiresTitleGuess}
-                    <input
-                      class="bonus-guess-input"
-                      type="text"
-                      maxlength="120"
-                      placeholder="Songtitel eingeben..."
-                      bind:value={draftTitle}
-                      on:focus={() => (editingBonusField = "title")}
-                      on:blur={() => {
-                        if (editingBonusField === "title") editingBonusField = "";
-                      }}
-                      on:input={handleBonusInput}
-                      on:keydown={(event) => {
-                        if (event.key === "Enter" && pendingPlacement && team.id === pendingPlacement.teamId) {
-                          handleLockIn();
-                        }
-                      }}
-                    />
-                  {/if}
-                </div>
-              {:else}
-                <div class="bonus-guess-preview">
-                  {#if draftArtist || (requiresTitleGuess && draftTitle)}
-                    <span class="bonus-preview-text">
-                      Tipp: <strong>{draftArtist || "?"}</strong>{#if requiresTitleGuess} – <strong>{draftTitle || "?"}</strong>{/if}
-                    </span>
-                  {:else}
-                    <span class="bonus-preview-muted">Team überlegt noch...</span>
-                  {/if}
-                </div>
-              {/if}
-            </div>
-          {/if}
           <div
             class="timeline-row"
             class:has-lockin={pendingPlacement && team.id === pendingPlacement.teamId && isActiveTeamMember}
@@ -1682,73 +1734,149 @@
     }
   }
 
-  .bonus-guess-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    flex-wrap: wrap;
-    padding: 8px 12px;
-    border-radius: 12px;
-    background: rgba(255, 59, 212, 0.09);
-    border: 1px solid rgba(255, 122, 230, 0.32);
-  }
-
-  .bonus-guess-label {
+  .bonus-capsule {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    font-weight: 600;
-    color: #ffd9f0;
+    gap: 6px;
+    padding: 3px 5px 3px 11px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, rgba(18, 20, 32, 0.92), rgba(11, 12, 20, 0.96));
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 6px 18px rgba(0, 0, 0, 0.35);
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .bonus-capsule.is-focused {
+    border-color: rgba(61, 240, 255, 0.72);
+    box-shadow: 0 0 0 2px rgba(61, 240, 255, 0.16), 0 8px 22px rgba(0, 0, 0, 0.45);
+  }
+
+  .bonus-capsule.is-filled:not(.is-focused) {
+    border-color: rgba(88, 255, 138, 0.55);
+    box-shadow: 0 0 14px rgba(88, 255, 138, 0.16), 0 6px 18px rgba(0, 0, 0, 0.35);
+  }
+
+  .bonus-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .bonus-icon {
+    width: 15px;
+    height: 15px;
+    fill: #3df0ff;
+    opacity: 0.88;
     flex-shrink: 0;
   }
 
-  .bonus-badge {
-    padding: 3px 8px;
+  .bonus-capsule.is-filled .bonus-icon {
+    fill: #58ff8a;
+  }
+
+  .bonus-capsule-input {
+    width: 155px;
+    padding: 4px 2px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: #f5f7ff !important;
+    font-size: 13px !important;
+    font-weight: 500;
+    line-height: 1.2;
+  }
+
+  .bonus-capsule-input::placeholder {
+    color: rgba(210, 220, 245, 0.45);
+    font-weight: 400;
+  }
+
+  .bonus-capsule-input:focus {
+    outline: none !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .bonus-clear-btn {
+    padding: 0;
+    width: 18px;
+    height: 18px;
     border-radius: 999px;
-    background: linear-gradient(135deg, rgba(255, 59, 212, 0.35), rgba(169, 107, 255, 0.35));
-    border: 1px solid rgba(255, 160, 235, 0.55);
+    border: 0;
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 10px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .bonus-clear-btn:hover {
+    background: rgba(255, 110, 200, 0.28);
+    color: #fff;
+  }
+
+  .bonus-divider {
+    width: 1px;
+    height: 16px;
+    background: rgba(255, 255, 255, 0.16);
+    margin: 0 2px;
+    flex-shrink: 0;
+  }
+
+  .bonus-chip {
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: rgba(61, 240, 255, 0.12);
+    border: 1px solid rgba(61, 240, 255, 0.35);
+    color: #bff8ff;
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.03em;
-    color: #fff;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
   }
 
-  .bonus-guess-inputs {
-    display: flex;
+  .bonus-chip.ready {
+    background: rgba(88, 255, 138, 0.2);
+    border-color: rgba(88, 255, 138, 0.6);
+    color: #b8ffd0;
+  }
+
+  .bonus-spectator-pill {
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
-    flex: 1;
-    min-width: min(240px, 100%);
-    flex-wrap: wrap;
-  }
-
-  .bonus-guess-input {
-    flex: 1;
-    min-width: 150px;
-    padding: 7px 11px;
-    border-radius: 9px;
-    border: 1px solid rgba(255, 255, 255, 0.22);
-    background: rgba(10, 10, 16, 0.78);
-    color: #fff;
-    font-size: 13px;
-  }
-
-  .bonus-guess-input:focus {
-    outline: none;
-    border-color: rgba(255, 122, 230, 0.85);
-    box-shadow: 0 0 0 2px rgba(255, 59, 212, 0.22);
-  }
-
-  .bonus-guess-preview {
+    gap: 7px;
+    padding: 4px 6px 4px 11px;
+    border-radius: 999px;
+    background: rgba(16, 18, 28, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.14);
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.85);
+    color: rgba(240, 244, 255, 0.88);
   }
 
-  .bonus-preview-muted {
-    color: rgba(255, 255, 255, 0.5);
-    font-style: italic;
+  .bonus-spectator-pill.has-text {
+    border-color: rgba(61, 240, 255, 0.4);
+  }
+
+  .bonus-spectator-text {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bonus-spectator-muted {
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 11.5px;
   }
 
   @media (max-width: 640px) {
@@ -1756,14 +1884,14 @@
       width: 68px;
     }
 
-    .bonus-guess-bar {
-      padding: 6px 9px;
-      gap: 6px;
+    .bonus-capsule {
+      padding: 3px 4px 3px 9px;
+      gap: 4px;
     }
 
-    .bonus-guess-input {
-      padding: 6px 9px;
-      font-size: 12px;
+    .bonus-capsule-input {
+      width: 120px;
+      font-size: 12px !important;
     }
   }
 </style>
