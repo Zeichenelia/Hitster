@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   export let players = [];
   export let teams = [];
+  export let rules = null;
   export let isHost = false;
   export let gameState = "playing";
   export let activeTeamId = "";
@@ -17,12 +18,15 @@
   export let lastRevealTeamId = "";
   export let pendingPlacement = null;
   export let slotVotes = [];
+  export let turnDeadline = null;
+  export let pendingGuess = { artist: "", title: "" };
   export let socketId = "";
   export let clientId = "";
   export let playerColors = {};
   export let onNextTurn = () => {};
   export let onPlaceCard = () => {};
   export let onVoteSlot = () => {};
+  export let onUpdateGuess = () => {};
   export let onRevealCard = () => {};
   export let onJoinTeam = () => {};
   export let onRenameTeam = () => {};
@@ -77,6 +81,61 @@
   let showHostMenu = false;
   let editingTeamId = "";
   let draftTeamName = "";
+  let remainingSeconds = 0;
+  let turnTimerInterval;
+  let draftArtist = "";
+  let draftTitle = "";
+  let editingBonusField = "";
+  let lastGuessCardId = "";
+
+  const updateRemainingTimer = () => {
+    if (!turnDeadline || !currentCard || !rules?.timerEnabled) {
+      remainingSeconds = 0;
+      return;
+    }
+    remainingSeconds = Math.max(0, Math.ceil((Number(turnDeadline) - Date.now()) / 1000));
+  };
+
+  $: if (turnDeadline || currentCard || rules) {
+    updateRemainingTimer();
+  }
+
+  $: if ((currentCard?.id || "") !== lastGuessCardId) {
+    lastGuessCardId = currentCard?.id || "";
+    draftArtist = pendingGuess?.artist || "";
+    draftTitle = pendingGuess?.title || "";
+    editingBonusField = "";
+  }
+
+  $: if (pendingGuess) {
+    if (editingBonusField !== "artist" && (pendingGuess.artist || "") !== draftArtist) {
+      draftArtist = pendingGuess.artist || "";
+    }
+    if (editingBonusField !== "title" && (pendingGuess.title || "") !== draftTitle) {
+      draftTitle = pendingGuess.title || "";
+    }
+  }
+
+  $: isBonusGuessMode =
+    Boolean(rules?.guessMode) &&
+    (rules.guessMode === "year+artist" || rules.guessMode === "year+artist+title");
+  $: requiresTitleGuess = rules?.guessMode === "year+artist+title";
+  $: timerTotalSeconds = Math.max(15, Number(rules?.timerDuration) || 60);
+  $: timerProgressPct =
+    rules?.timerEnabled && currentCard && turnDeadline
+      ? Math.max(0, Math.min(100, (remainingSeconds / timerTotalSeconds) * 100))
+      : 0;
+
+  const handleBonusInput = () => {
+    if (!isActiveTeamMember || !currentCard) {
+      return;
+    }
+    onUpdateGuess(draftArtist, draftTitle);
+  };
+
+  const handleLockIn = () => {
+    onRevealCard({ artist: draftArtist, title: draftTitle });
+  };
 
   const canRenameTeam = (teamId) => Boolean(myTeamId) && myTeamId === teamId;
 
@@ -553,6 +612,7 @@
       };
       window.addEventListener("pointerdown", handleFirstInteract, { once: true });
       playerPollTimer = window.setInterval(syncPlaybackProgress, 500);
+      turnTimerInterval = window.setInterval(updateRemainingTimer, 250);
     }
     return () => {
       if (typeof window !== "undefined") {
@@ -560,6 +620,9 @@
         window.removeEventListener("message", handlePlayerMessage);
         if (playerPollTimer) {
           window.clearInterval(playerPollTimer);
+        }
+        if (turnTimerInterval) {
+          window.clearInterval(turnTimerInterval);
         }
       }
     };
@@ -678,8 +741,33 @@
             }}
           />
           <div class="music-player-body">
-            <h2 class="music-player-title">Card #{displayCard.cardNumber || "?"}</h2>
-            <p class="music-player-subtitle">{displayCard.packName || "Unknown Playlist"}</p>
+            <div class="music-player-top-row">
+              <div>
+                <h2 class="music-player-title">Card #{displayCard.cardNumber || "?"}</h2>
+                <p class="music-player-subtitle">{displayCard.packName || "Unknown Playlist"}</p>
+              </div>
+              {#if rules?.timerEnabled && currentCard && turnDeadline}
+                <div
+                  class="turn-timer-pill"
+                  class:timer-warning={remainingSeconds <= 15 && remainingSeconds > 5}
+                  class:timer-danger={remainingSeconds <= 5}
+                  title="Verbleibende Rundenzeit"
+                >
+                  <span class="turn-timer-icon">⏱</span>
+                  <span class="turn-timer-value">{remainingSeconds}s</span>
+                </div>
+              {/if}
+            </div>
+            {#if rules?.timerEnabled && currentCard && turnDeadline}
+              <div class="turn-timer-bar" aria-hidden="true">
+                <div
+                  class="turn-timer-bar-fill"
+                  class:timer-warning={remainingSeconds <= 15 && remainingSeconds > 5}
+                  class:timer-danger={remainingSeconds <= 5}
+                  style={`width: ${timerProgressPct}%`}
+                ></div>
+              </div>
+            {/if}
             <div class="music-player-controls">
               <button class="music-control-btn" type="button" aria-label="10 Sekunden zurück" on:click={() => seekRelative(-10)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2L7 6l5 4V7c3.3 0 6 2.7 6 6a6 6 0 0 1-6 6 6 6 0 0 1-5.7-4H4.2A8 8 0 0 0 12 21a8 8 0 0 0 0-16z"/></svg>
@@ -857,6 +945,64 @@
               <span class="score-badge">{team.score ?? 0}</span>
             </div>
           </div>
+          {#if team.id === activeTeamId && currentCard && isBonusGuessMode}
+            <div class="bonus-guess-bar">
+              <div class="bonus-guess-label">
+                <span class="bonus-badge">🎯 +1 Bonus</span>
+                <span>{requiresTitleGuess ? "Interpret & Titel" : "Interpret"}</span>
+              </div>
+              {#if isActiveTeamMember}
+                <div class="bonus-guess-inputs">
+                  <input
+                    class="bonus-guess-input"
+                    type="text"
+                    maxlength="120"
+                    placeholder="Interpret eingeben..."
+                    bind:value={draftArtist}
+                    on:focus={() => (editingBonusField = "artist")}
+                    on:blur={() => {
+                      if (editingBonusField === "artist") editingBonusField = "";
+                    }}
+                    on:input={handleBonusInput}
+                    on:keydown={(event) => {
+                      if (event.key === "Enter" && pendingPlacement && team.id === pendingPlacement.teamId) {
+                        handleLockIn();
+                      }
+                    }}
+                  />
+                  {#if requiresTitleGuess}
+                    <input
+                      class="bonus-guess-input"
+                      type="text"
+                      maxlength="120"
+                      placeholder="Songtitel eingeben..."
+                      bind:value={draftTitle}
+                      on:focus={() => (editingBonusField = "title")}
+                      on:blur={() => {
+                        if (editingBonusField === "title") editingBonusField = "";
+                      }}
+                      on:input={handleBonusInput}
+                      on:keydown={(event) => {
+                        if (event.key === "Enter" && pendingPlacement && team.id === pendingPlacement.teamId) {
+                          handleLockIn();
+                        }
+                      }}
+                    />
+                  {/if}
+                </div>
+              {:else}
+                <div class="bonus-guess-preview">
+                  {#if draftArtist || (requiresTitleGuess && draftTitle)}
+                    <span class="bonus-preview-text">
+                      Tipp: <strong>{draftArtist || "?"}</strong>{#if requiresTitleGuess} – <strong>{draftTitle || "?"}</strong>{/if}
+                    </span>
+                  {:else}
+                    <span class="bonus-preview-muted">Team überlegt noch...</span>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/if}
           <div
             class="timeline-row"
             class:has-lockin={pendingPlacement && team.id === pendingPlacement.teamId && isActiveTeamMember}
@@ -941,7 +1087,7 @@
                   {#if isPendingHere}
                     <div class="timeline-slot card-slot pending-slot">
                       {#if isActiveTeamMember}
-                        <button class="primary lock-in-button" on:click={onRevealCard}>Lock in</button>
+                        <button class="primary lock-in-button" on:click={handleLockIn}>Lock in</button>
                       {/if}
                       <div
                         class="timeline-card back pending-drag"
@@ -1465,9 +1611,159 @@
     }
   }
 
+  .music-player-top-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .turn-timer-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(61, 240, 255, 0.14);
+    border: 1px solid rgba(61, 240, 255, 0.45);
+    color: #d6fbff;
+    font-size: 13px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+    box-shadow: 0 0 12px rgba(61, 240, 255, 0.2);
+  }
+
+  .turn-timer-pill.timer-warning {
+    background: rgba(255, 179, 71, 0.18);
+    border-color: rgba(255, 179, 71, 0.65);
+    color: #ffe2b3;
+    box-shadow: 0 0 12px rgba(255, 179, 71, 0.3);
+  }
+
+  .turn-timer-pill.timer-danger {
+    background: rgba(255, 77, 109, 0.25);
+    border-color: rgba(255, 100, 130, 0.85);
+    color: #ffd6de;
+    box-shadow: 0 0 16px rgba(255, 77, 109, 0.5);
+    animation: timerPulse 0.65s ease-in-out infinite alternate;
+  }
+
+  .turn-timer-bar {
+    width: 100%;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    overflow: hidden;
+    margin-top: 2px;
+  }
+
+  .turn-timer-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #3df0ff, #58ff8a);
+    transition: width 0.25s linear;
+  }
+
+  .turn-timer-bar-fill.timer-warning {
+    background: linear-gradient(90deg, #ffb347, #ffd43d);
+  }
+
+  .turn-timer-bar-fill.timer-danger {
+    background: linear-gradient(90deg, #ff4d6d, #ff8a3d);
+  }
+
+  @keyframes timerPulse {
+    from {
+      transform: scale(1);
+    }
+    to {
+      transform: scale(1.06);
+    }
+  }
+
+  .bonus-guess-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: rgba(255, 59, 212, 0.09);
+    border: 1px solid rgba(255, 122, 230, 0.32);
+  }
+
+  .bonus-guess-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #ffd9f0;
+    flex-shrink: 0;
+  }
+
+  .bonus-badge {
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, rgba(255, 59, 212, 0.35), rgba(169, 107, 255, 0.35));
+    border: 1px solid rgba(255, 160, 235, 0.55);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: #fff;
+  }
+
+  .bonus-guess-inputs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: min(240px, 100%);
+    flex-wrap: wrap;
+  }
+
+  .bonus-guess-input {
+    flex: 1;
+    min-width: 150px;
+    padding: 7px 11px;
+    border-radius: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    background: rgba(10, 10, 16, 0.78);
+    color: #fff;
+    font-size: 13px;
+  }
+
+  .bonus-guess-input:focus {
+    outline: none;
+    border-color: rgba(255, 122, 230, 0.85);
+    box-shadow: 0 0 0 2px rgba(255, 59, 212, 0.22);
+  }
+
+  .bonus-guess-preview {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  .bonus-preview-muted {
+    color: rgba(255, 255, 255, 0.5);
+    font-style: italic;
+  }
+
   @media (max-width: 640px) {
     .music-volume-slider {
       width: 68px;
+    }
+
+    .bonus-guess-bar {
+      padding: 6px 9px;
+      gap: 6px;
+    }
+
+    .bonus-guess-input {
+      padding: 6px 9px;
+      font-size: 12px;
     }
   }
 </style>

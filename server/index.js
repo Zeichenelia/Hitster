@@ -139,6 +139,8 @@ function serializeRoomState(room) {
     remainingCards: room.deck.length,
     pendingPlacement: room.pendingPlacement || null,
     slotVotes: Object.values(room.slotVotes || {}),
+    turnDeadline: room.turnDeadline || null,
+    pendingGuess: room.pendingGuess || { artist: "", title: "" },
   };
 }
 
@@ -173,6 +175,262 @@ function drawValidCard(room) {
 function broadcastRoomState(roomCode, room) {
   room.version += 1;
   io.to(roomCode).emit("room:state", serializeRoomState(room));
+}
+
+const roomTimers = new Map();
+
+function clearRoomTurnTimer(roomCode, room) {
+  const existing = roomTimers.get(roomCode);
+  if (existing) {
+    clearTimeout(existing);
+    roomTimers.delete(roomCode);
+  }
+  if (room) {
+    room.turnDeadline = null;
+  }
+}
+
+function normalizeGuessString(raw) {
+  if (typeof raw !== "string") {
+    return "";
+  }
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .replace(/ß/gu, "ss")
+    .replace(/ø/giu, "o")
+    .replace(/æ/giu, "ae")
+    .toLowerCase()
+    .replace(/\b(?:feat|ft|featuring)\b\.?.*$/gu, " ")
+    .replace(/\([^)]*\)|\[[^\]]*\]/gu, " ")
+    .replace(/\s+-\s+.*$/gu, " ")
+    .replace(/[&+/]/gu, " ")
+    .replace(/[^a-z0-9\s]/gu, " ")
+    .replace(/\b(?:the|die|der|das|and|und|mit)\b/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function normalizeKeepBrackets(raw) {
+  if (typeof raw !== "string") {
+    return "";
+  }
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .replace(/ß/gu, "ss")
+    .replace(/ø/giu, "o")
+    .replace(/æ/giu, "ae")
+    .toLowerCase()
+    .replace(/\b(?:feat|ft|featuring)\b\.?[^)\]]*/gu, " ")
+    .replace(/[&+/]/gu, " ")
+    .replace(/[^a-z0-9\s]/gu, " ")
+    .replace(/\b(?:the|die|der|das|and|und|mit)\b/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function levenshteinDistance(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const v0 = new Array(b.length + 1);
+  const v1 = new Array(b.length + 1);
+  for (let i = 0; i <= b.length; i += 1) {
+    v0[i] = i;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    v1[0] = i + 1;
+    for (let j = 0; j < b.length; j += 1) {
+      const cost = a[i] === b[j] ? 0 : 1;
+      v1[j + 1] = Math.min(v1[j] + 1, v0[j + 1] + 1, v0[j] + cost);
+    }
+    for (let j = 0; j <= b.length; j += 1) {
+      v0[j] = v1[j];
+    }
+  }
+  return v0[b.length];
+}
+
+function isFuzzyMatch(guessRaw, candidates) {
+  const guessForms = [normalizeGuessString(guessRaw), normalizeKeepBrackets(guessRaw)].filter(Boolean);
+  if (guessForms.length === 0) {
+    return false;
+  }
+  for (const candidate of candidates) {
+    const targetForms = [normalizeGuessString(candidate), normalizeKeepBrackets(candidate)].filter(Boolean);
+    for (const g of guessForms) {
+      for (const t of targetForms) {
+        if (g === t) {
+          return true;
+        }
+        if (
+          g.length >= 4 &&
+          (t.includes(g) || g.includes(t)) &&
+          Math.min(g.length, t.length) / Math.max(g.length, t.length) >= 0.65
+        ) {
+          return true;
+        }
+        const dist = levenshteinDistance(g, t);
+        const maxLen = Math.max(g.length, t.length);
+        const ratio = maxLen > 0 ? 1 - dist / maxLen : 0;
+        if (ratio >= 0.72 || (maxLen >= 5 && dist <= 2) || (maxLen >= 3 && dist <= 1)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function checkArtistGuess(guessArtist, actualArtist) {
+  const raw = String(actualArtist || "").trim();
+  if (!raw) return false;
+  const parts = raw
+    .split(/[,&;/]|\b(?:feat|ft|featuring|and|und|mit|x|vs)\b\.?/iu)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 2);
+  return isFuzzyMatch(guessArtist, [raw, ...parts]);
+}
+
+function checkTitleGuess(guessTitle, actualTitle) {
+  const raw = String(actualTitle || "").trim();
+  if (!raw) return false;
+  const parts = raw
+    .split(/\s+-\s+|\(|\)|\[|\]/u)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 2);
+  return isFuzzyMatch(guessTitle, [raw, ...parts]);
+}
+
+function evaluateBonusGuess(rules, card, guess) {
+  const mode = rules?.guessMode || "year";
+  if (mode === "year" || !card) {
+    return { bonusPoints: 0, artistCorrect: null, titleCorrect: null };
+  }
+  const artistGuess = String(guess?.artist || "").trim();
+  const titleGuess = String(guess?.title || "").trim();
+  const artistCorrect = checkArtistGuess(artistGuess, card.artist);
+  if (mode === "year+artist") {
+    return {
+      bonusPoints: artistCorrect ? 1 : 0,
+      artistCorrect,
+      titleCorrect: null,
+      hadGuess: Boolean(artistGuess),
+    };
+  }
+  if (mode === "year+artist+title") {
+    const titleCorrect = checkTitleGuess(titleGuess, card.title);
+    return {
+      bonusPoints: artistCorrect && titleCorrect ? 1 : 0,
+      artistCorrect,
+      titleCorrect,
+      hadGuess: Boolean(artistGuess || titleGuess),
+    };
+  }
+  return { bonusPoints: 0, artistCorrect: null, titleCorrect: null, hadGuess: false };
+}
+
+function executeCardReveal(room, roomCode, { forceMiss = false, timedOut = false, guessOverride = null } = {}) {
+  clearRoomTurnTimer(roomCode, room);
+  if (!room || room.state !== "playing" || !room.currentCard) {
+    return;
+  }
+  const team = room.teams.get(room.activeTeamId);
+  if (!team) {
+    return;
+  }
+
+  const normalizeYear = (value) => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  };
+
+  const timeline = team.timeline || [];
+  const hasPlacement = Boolean(room.pendingPlacement && room.pendingPlacement.teamId === room.activeTeamId);
+  const index = hasPlacement
+    ? Math.max(0, Math.min(Number(room.pendingPlacement.position) || 0, timeline.length))
+    : 0;
+
+  let correct = false;
+  if (!forceMiss && hasPlacement) {
+    const cardYear = normalizeYear(room.currentCard.year);
+    const prevYear = index > 0 ? normalizeYear(timeline[index - 1].year) : -Infinity;
+    const nextYear = index < timeline.length ? normalizeYear(timeline[index].year) : Infinity;
+    correct = timeline.length === 0 ? true : cardYear >= prevYear && cardYear <= nextYear;
+  }
+
+  const effectiveGuess = guessOverride || room.pendingGuess || { artist: "", title: "" };
+  const bonusResult = evaluateBonusGuess(room.rules, room.currentCard, effectiveGuess);
+
+  if (correct) {
+    team.score += 1;
+    team.timeline = [...timeline.slice(0, index), room.currentCard, ...timeline.slice(index)];
+  } else {
+    room.pendingDiscard = room.currentCard;
+  }
+
+  if (bonusResult.bonusPoints > 0) {
+    team.score += bonusResult.bonusPoints;
+  }
+
+  room.roundResults.set(team.id, correct);
+
+  const revealedCard = room.currentCard;
+  room.currentCard = null;
+  room.audioState = room.audioState?.videoId ? room.audioState : createAudioState(revealedCard);
+  room.pendingPlacement = null;
+  room.pendingGuess = { artist: "", title: "" };
+  room.slotVotes = {};
+  room.turnIndex = (room.turnIndex + 1) % room.turnOrder.length;
+  room.activeTeamId = room.turnOrder[room.turnIndex];
+
+  io.to(roomCode).emit("game:card-revealed", {
+    teamId: team.id,
+    card: serializeCardForClient(revealedCard),
+    correct,
+    position: index,
+    activeTeamId: room.activeTeamId,
+    remainingCards: room.deck.length,
+    audioState: room.audioState,
+    timedOut,
+    hadPlacement: hasPlacement,
+    bonusPoints: bonusResult.bonusPoints,
+    artistCorrect: bonusResult.artistCorrect,
+    titleCorrect: bonusResult.titleCorrect,
+    hadGuess: bonusResult.hadGuess,
+  });
+  io.to(roomCode).emit("room:teams", { teams: Array.from(room.teams.values()) });
+  advanceRound(room, roomCode);
+  broadcastRoomState(roomCode, room);
+}
+
+function startRoomTurnTimer(roomCode, room) {
+  clearRoomTurnTimer(roomCode, room);
+  if (!room || room.state !== "playing" || !room.currentCard || !room.rules?.timerEnabled) {
+    return;
+  }
+  const activeTeam = room.teams.get(room.activeTeamId);
+  if (!activeTeam || (activeTeam.timeline || []).length === 0) {
+    return;
+  }
+  const durationSec = Math.max(5, Math.min(300, Number(room.rules.timerDuration) || 60));
+  room.turnDeadline = Date.now() + durationSec * 1000;
+  const timerId = setTimeout(() => {
+    roomTimers.delete(roomCode);
+    const currentRoom = rooms.get(roomCode);
+    if (!currentRoom || currentRoom.state !== "playing" || !currentRoom.currentCard) {
+      return;
+    }
+    const hasPlacement = Boolean(
+      currentRoom.pendingPlacement && currentRoom.pendingPlacement.teamId === currentRoom.activeTeamId
+    );
+    executeCardReveal(currentRoom, roomCode, {
+      forceMiss: !hasPlacement,
+      timedOut: true,
+    });
+  }, durationSec * 1000);
+  roomTimers.set(roomCode, timerId);
 }
 
 function sortTeamIds(teamIds) {
@@ -269,6 +527,8 @@ function createRoom(code, hostId, hostName) {
         pendingPlacement: null,
         pendingDiscard: null,
         slotVotes: {},
+        turnDeadline: null,
+        pendingGuess: { artist: "", title: "" },
         activeTeamId: null,
         turnOrder: [],
         turnIndex: 0,
@@ -742,6 +1002,8 @@ io.on("connection", (socket) => {
     room.audioSyncAuthorityUpdatedAt = 0;
     room.pendingDiscard = null;
     room.slotVotes = {};
+    room.pendingGuess = { artist: "", title: "" };
+    clearRoomTurnTimer(roomCode, room);
 
     for (const team of room.teams.values()) {
       team.score = 0;
@@ -803,6 +1065,8 @@ io.on("connection", (socket) => {
     room.pendingPlacement = null;
     room.pendingDiscard = null;
     room.slotVotes = {};
+    room.pendingGuess = { artist: "", title: "" };
+    clearRoomTurnTimer(roomCode, room);
     room.audioState = null;
     room.audioSyncAuthorityId = null;
     room.audioSyncAuthorityUpdatedAt = 0;
@@ -849,6 +1113,8 @@ io.on("connection", (socket) => {
     room.pendingPlacement = null;
     room.pendingDiscard = null;
     room.slotVotes = {};
+    room.pendingGuess = { artist: "", title: "" };
+    clearRoomTurnTimer(roomCode, room);
     room.audioState = null;
     room.audioSyncAuthorityId = null;
     room.audioSyncAuthorityUpdatedAt = 0;
@@ -913,15 +1179,18 @@ io.on("connection", (socket) => {
       return;
     }
     room.currentCard = nextCard;
+    room.pendingGuess = { artist: "", title: "" };
     room.audioState = createAudioState(nextCard);
     room.audioSyncAuthorityId = null;
     room.audioSyncAuthorityUpdatedAt = 0;
+    startRoomTurnTimer(roomCode, room);
 
     io.to(roomCode).emit("game:host-song-skipped", {
       activeTeamId: room.activeTeamId,
       card: serializeCardForClient(nextCard),
       remainingCards: room.deck.length,
       audioState: room.audioState,
+      turnDeadline: room.turnDeadline,
     });
     broadcastRoomState(roomCode, room);
   });
@@ -954,15 +1223,18 @@ io.on("connection", (socket) => {
     }
 
     room.currentCard = nextCard;
+    room.pendingGuess = { artist: "", title: "" };
     room.audioState = createAudioState(nextCard);
     room.audioSyncAuthorityId = null;
     room.audioSyncAuthorityUpdatedAt = 0;
+    startRoomTurnTimer(roomCode, room);
 
     io.to(roomCode).emit("game:host-song-skipped", {
       activeTeamId: room.activeTeamId,
       card: serializeCardForClient(nextCard),
       remainingCards: room.deck.length,
       audioState: room.audioState,
+      turnDeadline: room.turnDeadline,
       autoSkipped: true,
     });
     broadcastRoomState(roomCode, room);
@@ -1004,23 +1276,29 @@ io.on("connection", (socket) => {
       room.discard.push(room.pendingDiscard);
       room.pendingDiscard = null;
     room.slotVotes = {};
+    room.pendingGuess = { artist: "", title: "" };
+    clearRoomTurnTimer(roomCode, room);
     }
 
     room.slotVotes = {};
+    room.pendingGuess = { artist: "", title: "" };
     const nextCard = drawValidCard(room);
     if (nextCard) {
       room.currentCard = nextCard;
       room.audioState = createAudioState(nextCard);
       room.audioSyncAuthorityId = null;
       room.audioSyncAuthorityUpdatedAt = 0;
+      startRoomTurnTimer(roomCode, room);
       io.to(roomCode).emit("game:next-turn", {
         activeTeamId: room.activeTeamId,
         card: serializeCardForClient(nextCard),
         remainingCards: room.deck.length,
         audioState: room.audioState,
+        turnDeadline: room.turnDeadline,
       });
       broadcastRoomState(roomCode, room);
     } else {
+      clearRoomTurnTimer(roomCode, room);
       io.to(roomCode).emit("game:deck-empty", { remainingCards: 0 });
       broadcastRoomState(roomCode, room);
     }
@@ -1135,7 +1413,25 @@ io.on("connection", (socket) => {
     broadcastRoomState(roomCode, room);
   });
 
-  socket.on("game:reveal-card", ({ roomCode } = {}) => {
+  socket.on("game:update-guess", ({ roomCode, artist, title } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room || room.state !== "playing" || !room.currentCard) {
+      return;
+    }
+    const requestingPlayer = room.players.get(socket.id);
+    if (!requestingPlayer || requestingPlayer.teamId !== room.activeTeamId) {
+      return;
+    }
+    room.pendingGuess = {
+      artist: typeof artist === "string" ? artist.slice(0, 120) : room.pendingGuess?.artist || "",
+      title: typeof title === "string" ? title.slice(0, 120) : room.pendingGuess?.title || "",
+    };
+    io.to(roomCode).emit("game:guess-updated", {
+      pendingGuess: room.pendingGuess,
+    });
+  });
+
+  socket.on("game:reveal-card", ({ roomCode, artistGuess, titleGuess } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) {
       socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
@@ -1159,52 +1455,15 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const team = room.teams.get(room.activeTeamId);
-    if (!team) {
-      socket.emit("error", { code: "TEAM_NOT_FOUND", message: "Team not found" });
-      return;
-    }
+    const guessOverride =
+      typeof artistGuess === "string" || typeof titleGuess === "string"
+        ? {
+            artist: typeof artistGuess === "string" ? artistGuess : room.pendingGuess?.artist || "",
+            title: typeof titleGuess === "string" ? titleGuess : room.pendingGuess?.title || "",
+          }
+        : null;
 
-    const normalizeYear = (value) => {
-      const parsed = Number.parseInt(value, 10);
-      return Number.isNaN(parsed) ? 0 : parsed;
-    };
-
-    const timeline = team.timeline || [];
-    const index = room.pendingPlacement.position;
-    const cardYear = normalizeYear(room.currentCard.year);
-    const prevYear = index > 0 ? normalizeYear(timeline[index - 1].year) : -Infinity;
-    const nextYear = index < timeline.length ? normalizeYear(timeline[index].year) : Infinity;
-    const correct = timeline.length === 0 ? true : (cardYear >= prevYear && cardYear <= nextYear);
-
-    if (correct) {
-      team.score += 1;
-      team.timeline = [...timeline.slice(0, index), room.currentCard, ...timeline.slice(index)];
-    } else {
-      room.pendingDiscard = room.currentCard;
-    }
-    room.roundResults.set(team.id, correct);
-
-    const revealedCard = room.currentCard;
-    room.currentCard = null;
-    room.audioState = room.audioState?.videoId ? room.audioState : createAudioState(revealedCard);
-    room.pendingPlacement = null;
-    room.slotVotes = {};
-    room.turnIndex = (room.turnIndex + 1) % room.turnOrder.length;
-    room.activeTeamId = room.turnOrder[room.turnIndex];
-
-    io.to(roomCode).emit("game:card-revealed", {
-      teamId: team.id,
-      card: serializeCardForClient(revealedCard),
-      correct,
-      position: index,
-      activeTeamId: room.activeTeamId,
-      remainingCards: room.deck.length,
-      audioState: room.audioState,
-    });
-    io.to(roomCode).emit("room:teams", { teams: Array.from(room.teams.values()) });
-    advanceRound(room, roomCode);
-    broadcastRoomState(roomCode, room);
+    executeCardReveal(room, roomCode, { guessOverride });
   });
 
   socket.on("game:score-update", ({ roomCode, teamId, card, correct } = {}) => {

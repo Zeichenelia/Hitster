@@ -46,6 +46,8 @@
   let autoPlacedCardId = "";
   let pendingPlacement = null;
   let slotVotes = [];
+  let turnDeadline = null;
+  let pendingGuess = { artist: "", title: "" };
   let audioUrl = "";
   let audioState = null;
   let leftTeams = [];
@@ -224,6 +226,8 @@
     remainingCards = payload.remainingCards ?? remainingCards;
     pendingPlacement = payload.pendingPlacement || null;
     slotVotes = payload.slotVotes || [];
+    turnDeadline = payload.turnDeadline || null;
+    pendingGuess = payload.pendingGuess || { artist: "", title: "" };
     if (payload.audioState) {
       audioState = payload.audioState;
     }
@@ -257,6 +261,8 @@
     lastPlacedCardId = "";
     lastPlacedTeamId = "";
     slotVotes = [];
+    turnDeadline = null;
+    pendingGuess = { artist: "", title: "" };
     autoPlacedCardId = "";
     winnerTeamId = "";
     showWinner = false;
@@ -279,6 +285,8 @@
     remainingCards = payload.remainingCards ?? remainingCards;
     pendingPlacement = null;
     slotVotes = [];
+    turnDeadline = payload.turnDeadline || null;
+    pendingGuess = payload.pendingGuess || { artist: "", title: "" };
     audioState = payload.audioState || null;
   });
 
@@ -290,6 +298,8 @@
     remainingCards = payload.remainingCards ?? remainingCards;
     pendingPlacement = null;
     slotVotes = [];
+    turnDeadline = payload.turnDeadline || null;
+    pendingGuess = payload.pendingGuess || { artist: "", title: "" };
     audioState = payload.audioState || null;
     if (payload.autoSkipped) {
       showToast("Video nicht verfügbar – neuer Song wurde automatisch gezogen.");
@@ -329,6 +339,10 @@
     slotVotes = payload.slotVotes || [];
   });
 
+  socket.on("game:guess-updated", (payload) => {
+    pendingGuess = payload.pendingGuess || { artist: "", title: "" };
+  });
+
   socket.on("game:card-revealed", (payload) => {
     activeTeamId = payload.activeTeamId || activeTeamId;
     remainingCards = payload.remainingCards ?? remainingCards;
@@ -346,8 +360,31 @@
     autoPlacedCardId = "";
     pendingPlacement = null;
     slotVotes = [];
+    turnDeadline = null;
+    pendingGuess = { artist: "", title: "" };
     if (payload.audioState) {
       audioState = payload.audioState;
+    }
+    if (payload.timedOut) {
+      if (!payload.hadPlacement) {
+        showToast("⏱ Zeit abgelaufen! Keine Karte platziert.");
+      } else if (payload.bonusPoints > 0) {
+        showToast("⏱ Zeit abgelaufen – Karte eingeloggt & +1 Bonuspunkt!");
+      } else {
+        showToast("⏱ Zeit abgelaufen – platzierte Karte wurde automatisch eingeloggt!");
+      }
+    } else if (payload.bonusPoints > 0) {
+      showToast(
+        rules?.guessMode === "year+artist+title"
+          ? "🎯 +1 Bonuspunkt für Interpret & Titel!"
+          : "🎯 +1 Bonuspunkt für richtigen Interpreten!"
+      );
+    } else if (payload.hadGuess && rules?.guessMode && rules.guessMode !== "year") {
+      const answerLabel =
+        rules.guessMode === "year+artist+title"
+          ? `${payload.card?.artist || "?"} – ${payload.card?.title || "?"}`
+          : `${payload.card?.artist || "?"}`;
+      showToast(`Bonustipp leider falsch (${answerLabel})`);
     }
   });
 
@@ -624,12 +661,31 @@
     });
   }
 
-  function revealCard() {
+  function updateGuess(artist, title) {
+    if (!roomCode || !activeTeamId || !currentCard) {
+      return;
+    }
+    pendingGuess = {
+      artist: String(artist ?? pendingGuess.artist ?? ""),
+      title: String(title ?? pendingGuess.title ?? ""),
+    };
+    socket.emit("game:update-guess", {
+      roomCode,
+      artist: pendingGuess.artist,
+      title: pendingGuess.title,
+    });
+  }
+
+  function revealCard(guess = {}) {
     if (!roomCode) {
       lastError = "room code required";
       return;
     }
-    socket.emit("game:reveal-card", { roomCode });
+    socket.emit("game:reveal-card", {
+      roomCode,
+      artistGuess: guess?.artist ?? pendingGuess.artist ?? "",
+      titleGuess: guess?.title ?? pendingGuess.title ?? "",
+    });
   }
 
   $: if (currentCard && activeTeamId) {
@@ -765,12 +821,15 @@
       {lastRevealTeamId}
       {pendingPlacement}
       {slotVotes}
+      {turnDeadline}
+      {pendingGuess}
       {socketId}
       {clientId}
       {playerColors}
       onNextTurn={nextTurn}
       onPlaceCard={placeCard}
       onVoteSlot={voteSlot}
+      onUpdateGuess={updateGuess}
       onRevealCard={revealCard}
       onJoinTeam={joinTeam}
       onRenameTeam={renameTeam}
