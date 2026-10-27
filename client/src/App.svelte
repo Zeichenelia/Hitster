@@ -2159,16 +2159,7 @@
     }
 
     :global(.drawn-card) {
-      position: relative;
-      top: auto;
-      right: auto;
-      width: 112px;
-      height: 126px;
-      flex-shrink: 0;
-    }
-
-    :global(.drawn-card .timeline-logo) {
-      width: 62px;
+      display: none;
     }
   }
 
@@ -2263,15 +2254,7 @@
       height: 34px;
     }
 
-    :global(.drawn-card) {
-      width: 88px;
-      height: 96px;
-      border-radius: 12px;
-    }
 
-    :global(.drawn-card .timeline-logo) {
-      width: 48px;
-    }
 
     :global(.team-timelines) {
       gap: 10px;
