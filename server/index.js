@@ -11,6 +11,15 @@ const PORT = process.env.PORT || 3001;
 const app = express();
 app.use(cors());
 
+// Prevent search engines and crawlers from indexing the site
+app.use((_req, res, next) => {
+  res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
+  next();
+});
+
+app.get("/robots.txt", (_req, res) => {
+  res.type("text/plain").send("User-agent: *\nDisallow: /\n");
+});
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
