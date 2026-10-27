@@ -196,6 +196,12 @@
     rules = payload.rules || null;
   });
 
+  socket.on("packs:updated", (payload) => {
+    if (Array.isArray(payload?.packs)) {
+      packs = payload.packs;
+    }
+  });
+
   socket.on("room:teams", (payload) => {
     teams = payload.teams || [];
     tryAutoJoinTeam();
@@ -791,6 +797,7 @@
 >
   {#if view === "create"}
     <CreateLobby
+      {apiBaseUrl}
       {lastError}
       bind:hostName
       bind:teamCount
@@ -804,6 +811,12 @@
       onCreateRoom={createRoom}
       onSelectAllPacks={selectAllPacks}
       onClearPacks={clearPacks}
+      onPacksUpdated={(nextPacks, newPackId) => {
+        packs = nextPacks;
+        if (newPackId && !selectedPackIds.includes(newPackId)) {
+          selectedPackIds = [...selectedPackIds, newPackId];
+        }
+      }}
     />
   {:else if gameState === "playing" || gameState === "finished"}
     <GameView

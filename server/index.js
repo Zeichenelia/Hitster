@@ -4,12 +4,15 @@ const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const { Server } = require("socket.io");
-const { parse } = require("csv-parse/sync");
+const db = require("./db");
 
 const PORT = process.env.PORT || 3001;
+const ADMIN_PIN = process.env.PLAYLIST_ADMIN_PIN || "1234";
+const REPO_ROOT = path.join(__dirname, "..");
 
 const app = express();
 app.use(cors());
+app.use(express.json({ limit: "5mb" }));
 
 // Prevent search engines and crawlers from indexing the site
 app.use((_req, res, next) => {
@@ -17,24 +20,190 @@ app.use((_req, res, next) => {
   next();
 });
 
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+  },
+});
+
+function requireAdminPin(req, res, next) {
+  const provided = String(req.headers["x-admin-pin"] ?? req.body?.pin ?? "").trim();
+  if (!provided || provided !== ADMIN_PIN) {
+    res.status(403).json({ code: "INVALID_PIN", message: "Ungültiger PIN-Code." });
+    return;
+  }
+  next();
+}
+
 app.get("/robots.txt", (_req, res) => {
   res.type("text/plain").send("User-agent: *\nDisallow: /\n");
 });
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
+  res.json({ status: "ok", dbConnected: db.isDatabaseConnected() });
 });
 
 app.get("/packs", (_req, res) => {
-  res.json(Array.from(packIndex.values()));
+  res.json(db.getAllPacks());
 });
 
 app.get("/pack-logo/:packId", (req, res) => {
-  const pack = packIndex.get(req.params.packId);
+  const pack = db.getPack(req.params.packId);
   if (!pack?.logo) {
     res.status(404).json({ code: "PACK_LOGO_NOT_FOUND" });
     return;
   }
-  res.sendFile(path.join(REPO_ROOT, pack.logo));
+  if (/^https?:\/\//iu.test(pack.logo)) {
+    res.redirect(pack.logo);
+    return;
+  }
+  const logoPath = path.join(REPO_ROOT, pack.logo);
+  if (!fs.existsSync(logoPath)) {
+    res.status(404).json({ code: "PACK_LOGO_NOT_FOUND" });
+    return;
+  }
+  res.sendFile(logoPath);
+});
+
+app.get("/api/playlists/status", (_req, res) => {
+  res.json({ dbConnected: db.isDatabaseConnected() });
+});
+
+app.post("/api/playlists/verify-pin", (req, res) => {
+  const provided = String(req.body?.pin ?? req.headers["x-admin-pin"] ?? "").trim();
+  res.json({
+    valid: Boolean(provided && provided === ADMIN_PIN),
+    dbConnected: db.isDatabaseConnected(),
+  });
+});
+
+app.get("/api/playlists/:packId/songs", (req, res) => {
+  const pack = db.getPack(req.params.packId);
+  if (!pack) {
+    res.status(404).json({ code: "PACK_NOT_FOUND", message: "Playlist nicht gefunden." });
+    return;
+  }
+  res.json({
+    pack,
+    songs: db.getSongsForPack(req.params.packId),
+  });
+});
+
+app.post("/api/playlists", requireAdminPin, async (req, res) => {
+  try {
+    const pack = await db.createPlaylist({
+      name: req.body?.name,
+      logo: req.body?.logo,
+      csvText: req.body?.csvText,
+    });
+    const packs = db.getAllPacks();
+    io.emit("packs:updated", { packs });
+    res.json({ pack, packs });
+  } catch (err) {
+    res.status(400).json({ code: "CREATE_FAILED", message: err.message });
+  }
+});
+
+app.delete("/api/playlists/:packId", requireAdminPin, async (req, res) => {
+  try {
+    await db.deletePlaylist(req.params.packId);
+    const packs = db.getAllPacks();
+    io.emit("packs:updated", { packs });
+    res.json({ packs });
+  } catch (err) {
+    res.status(400).json({ code: "DELETE_FAILED", message: err.message });
+  }
+});
+
+app.post("/api/playlists/:packId/songs", requireAdminPin, async (req, res) => {
+  try {
+    const packId = req.params.packId;
+    let songsInput = [];
+    if (typeof req.body?.csvText === "string" && req.body.csvText.trim()) {
+      songsInput = db.parseCsvSongs(req.body.csvText, packId);
+    } else if (Array.isArray(req.body?.songs)) {
+      songsInput = req.body.songs;
+    } else if (req.body?.song) {
+      songsInput = [req.body.song];
+    }
+    const songs = await db.addSongsToPlaylist(packId, songsInput);
+    const packs = db.getAllPacks();
+    io.emit("packs:updated", { packs });
+    res.json({ songs, packs });
+  } catch (err) {
+    res.status(400).json({ code: "ADD_SONG_FAILED", message: err.message });
+  }
+});
+
+app.put("/api/playlists/:packId/songs/:songId", requireAdminPin, async (req, res) => {
+  try {
+    const songs = await db.updateSong(req.params.packId, req.params.songId, req.body || {});
+    res.json({ songs });
+  } catch (err) {
+    res.status(400).json({ code: "UPDATE_SONG_FAILED", message: err.message });
+  }
+});
+
+app.delete("/api/playlists/:packId/songs/:songId", requireAdminPin, async (req, res) => {
+  try {
+    const songs = await db.deleteSong(req.params.packId, req.params.songId);
+    const packs = db.getAllPacks();
+    io.emit("packs:updated", { packs });
+    res.json({ songs, packs });
+  } catch (err) {
+    res.status(400).json({ code: "DELETE_SONG_FAILED", message: err.message });
+  }
+});
+
+app.get("/api/youtube-meta", async (req, res) => {
+  const rawUrl = String(req.query.url || "").trim();
+  const videoId = getYouTubeId(rawUrl);
+  if (!videoId) {
+    res.status(400).json({ code: "INVALID_YOUTUBE_URL", message: "Ungültiger YouTube-Link." });
+    return;
+  }
+  const canonicalUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  try {
+    const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`;
+    const response = await fetch(oembedUrl);
+    if (!response.ok) {
+      throw new Error(`YouTube oEmbed returned ${response.status}`);
+    }
+    const data = await response.json();
+    const rawTitle = String(data.title || "").trim();
+    const rawAuthor = String(data.author_name || "")
+      .replace(/\s*-\s*Topic$/iu, "")
+      .replace(/VEVO$/iu, "")
+      .trim();
+
+    const yearMatch = rawTitle.match(/\b(19[2-9]\d|20[0-2]\d)\b/u);
+    const detectedYear = yearMatch ? Number.parseInt(yearMatch[1], 10) : "";
+
+    const cleanedTitle = rawTitle
+      .replace(/\((?:official|offizielles?|music|musik|lyric|lyrics|audio|video|hd|hq|4k|remaster(?:ed)?|live)[^)]*\)/giu, "")
+      .replace(/\[(?:official|offizielles?|music|musik|lyric|lyrics|audio|video|hd|hq|4k|remaster(?:ed)?|live)[^\]]*\]/giu, "")
+      .replace(/\s+/gu, " ")
+      .trim();
+
+    let artist = rawAuthor;
+    let title = cleanedTitle;
+    const dashParts = cleanedTitle.split(/\s+[-–—]\s+/u);
+    if (dashParts.length >= 2) {
+      artist = dashParts[0].trim();
+      title = dashParts.slice(1).join(" - ").trim();
+    }
+
+    res.json({
+      videoId,
+      url: canonicalUrl,
+      artist,
+      title,
+      year: detectedYear,
+      youtubeTitle: rawTitle,
+    });
+  } catch (err) {
+    res.status(400).json({ code: "YOUTUBE_FETCH_FAILED", message: "Konnte Metadaten nicht laden." });
+  }
 });
 
 // Serve the built Svelte client (client/dist) when it exists, e.g. on Render.
@@ -43,38 +212,21 @@ if (fs.existsSync(CLIENT_DIST)) {
   app.use(express.static(CLIENT_DIST));
   // SPA fallback: send index.html for any other GET request (e.g. invite links).
   app.use((req, res, next) => {
-    if (req.method !== "GET" || req.path.startsWith("/socket.io")) {
+    if (req.method !== "GET" || req.path.startsWith("/socket.io") || req.path.startsWith("/api/")) {
       next();
       return;
     }
     res.sendFile(path.join(CLIENT_DIST, "index.html"));
   });
 }
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: "*",
-  },
-});
 
 const rooms = new Map();
-
-const REPO_ROOT = path.join(__dirname, "..");
-const PACK_LIST_PATH = path.join(REPO_ROOT, "data", "playlists", "hitster_de_packs.json");
-
-function loadPackIndex() {
-  const raw = fs.readFileSync(PACK_LIST_PATH, "utf-8");
-  const packs = JSON.parse(raw);
-  return new Map(packs.map((pack) => [pack.id, pack]));
-}
-
-const packIndex = loadPackIndex();
 
 function serializeCardForClient(card) {
   if (!card) {
     return null;
   }
-  const pack = packIndex.get(card.packId);
+  const pack = db.getPack(card.packId);
   return {
     id: card.id,
     url: card.url || "",
@@ -97,33 +249,7 @@ function shuffleDeck(deck) {
 }
 
 function loadDeckFromPacks(packIds) {
-  const cards = [];
-  for (const packId of packIds) {
-    const pack = packIndex.get(packId);
-    if (!pack) {
-      continue;
-    }
-    const csvPath = path.join(REPO_ROOT, pack.file);
-    const raw = fs.readFileSync(csvPath, "utf-8");
-    const records = parse(raw, { columns: true, skip_empty_lines: true, bom: true });
-    for (const row of records) {
-      const parsedYear = Number.parseInt(row["Year"], 10);
-      const year = Number.isNaN(parsedYear) ? row["Year"] : parsedYear;
-      const cardNumber = row["Card#"] || row["﻿Card#"] || "";
-      cards.push({
-        id: `${packId}-${cardNumber || cards.length + 1}`,
-        packId,
-        cardNumber,
-        title: row["Title"] || "",
-        artist: row["Artist"] || "",
-        year,
-        url: row["URL"] || "",
-        youtubeTitle: row["Youtube-Title"] || "",
-        isrc: row["ISRC"] || "",
-      });
-    }
-  }
-  return cards;
+  return db.loadDeckFromPacks(packIds);
 }
 
 function serializeRoomState(room) {
@@ -1207,6 +1333,7 @@ io.on("connection", (socket) => {
       return;
     }
 
+    db.markSongBroken(room.currentCard);
     room.discard.push(room.currentCard);
     room.pendingPlacement = null;
     room.slotVotes = {};
@@ -1540,7 +1667,9 @@ io.on("connection", (socket) => {
 });
 
 
-server.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`);
+db.initDatabase().finally(() => {
+  server.listen(PORT, () => {
+    console.log(`Server listening on http://localhost:${PORT}`);
+  });
 });
 

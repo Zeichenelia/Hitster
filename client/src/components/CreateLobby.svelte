@@ -1,4 +1,7 @@
 <script>
+  import PlaylistManagerModal from "./PlaylistManagerModal.svelte";
+
+  export let apiBaseUrl = "";
   export let lastError = "";
   export let hostName = "";
   export let teamCount = 2;
@@ -12,8 +15,10 @@
   export let onCreateRoom = () => {};
   export let onSelectAllPacks = () => {};
   export let onClearPacks = () => {};
+  export let onPacksUpdated = () => {};
 
   let packSearch = "";
+  let showPlaylistModal = false;
   const defaultHostName = "Host";
 
   const isPackSelected = (packId) => selectedPackIds.includes(packId);
@@ -96,6 +101,9 @@
       <div class="card-head">
         <h2>Packs</h2>
         <div class="pack-actions">
+          <button class="ghost manage-packs-btn" type="button" on:click={() => (showPlaylistModal = true)}>
+            🎵 Songs / Playlists +
+          </button>
           <button class="ghost" on:click={onSelectAllPacks}>Select all</button>
           <button class="ghost" on:click={onClearPacks}>Clear</button>
         </div>
@@ -136,3 +144,24 @@
     </div>
   </div>
 </section>
+
+{#if showPlaylistModal}
+  <PlaylistManagerModal
+    {apiBaseUrl}
+    {packs}
+    onClose={() => (showPlaylistModal = false)}
+    {onPacksUpdated}
+  />
+{/if}
+
+<style>
+  .manage-packs-btn {
+    border-color: rgba(61, 240, 255, 0.45) !important;
+    background: rgba(61, 240, 255, 0.1) !important;
+    color: #d6fbff !important;
+  }
+
+  .manage-packs-btn:hover {
+    background: rgba(61, 240, 255, 0.2) !important;
+  }
+</style>
