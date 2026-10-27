@@ -1571,7 +1571,7 @@
 
   :global(.timeline-slot.drop-slot.tap-ready),
   :global(.timeline-slot.drop-slot.has-votes) {
-    width: 42px;
+    width: 46px;
     margin-right: 12px;
   }
 
@@ -1583,9 +1583,11 @@
   :global(.timeline-drop) {
     border: 1px dashed rgba(255, 255, 255, 0.15);
     border-radius: 12px;
-    min-height: 48px;
-    display: grid;
-    place-items: center;
+    min-height: 160px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
     color: rgba(255, 255, 255, 0.35);
     font-size: 11px;
     text-transform: uppercase;
