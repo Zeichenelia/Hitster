@@ -14,6 +14,7 @@ let bridgeMode = false;
 let bridgeUrl = "";
 let bridgeSecret = "";
 let lastDbError = "";
+let initInProgress = null;
 
 function slugifyPackId(name) {
   const base = String(name || "playlist")
@@ -202,8 +203,79 @@ async function reloadFromBridge() {
   }
 }
 
+async function deduplicateAndRepairBridgePlaylists(diskPacks, diskSongsByPack) {
+  let changed = false;
+
+  for (const [packId, diskPack] of diskPacks.entries()) {
+    const currentPack = packIndex.get(packId);
+    const currentSongs = songsByPack.get(packId) || [];
+    const diskSongs = diskSongsByPack.get(packId) || [];
+
+    if (!currentPack || (currentSongs.length === 0 && diskSongs.length > 0)) {
+      console.log(`[DB-Bridge] Seeding missing/empty playlist "${diskPack.name}" (${diskSongs.length} songs)...`);
+      if (currentPack) {
+        await callBridge("delete_playlist", { packId });
+      }
+      const firstChunk = diskSongs.slice(0, 100);
+      await callBridge("create_playlist", { pack: diskPack, songs: firstChunk });
+      for (let i = 100; i < diskSongs.length; i += 100) {
+        await callBridge("add_songs", { packId, songs: diskSongs.slice(i, i + 100) });
+      }
+      changed = true;
+    }
+  }
+
+  for (const [packId, pack] of packIndex.entries()) {
+    const songs = songsByPack.get(packId) || [];
+    const seen = new Set();
+    const uniqueSongs = [];
+    for (const s of songs) {
+      const key = `${String(s.cardNumber || "").trim()}|${String(s.title || "").trim().toLowerCase()}|${String(s.artist || "").trim().toLowerCase()}|${s.year}|${String(s.url || "").trim()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueSongs.push(s);
+      }
+    }
+    if (uniqueSongs.length < songs.length) {
+      console.log(
+        `[DB-Bridge] Removing ${songs.length - uniqueSongs.length} duplicate songs from "${pack.name}" (${songs.length} -> ${uniqueSongs.length})...`
+      );
+      await callBridge("delete_playlist", { packId });
+      const firstChunk = uniqueSongs.slice(0, 100);
+      await callBridge("create_playlist", { pack, songs: firstChunk });
+      for (let i = 100; i < uniqueSongs.length; i += 100) {
+        await callBridge("add_songs", { packId, songs: uniqueSongs.slice(i, i + 100) });
+      }
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    await reloadFromBridge();
+  }
+}
+
 async function initDatabase() {
+  if (initInProgress) {
+    return initInProgress;
+  }
+  initInProgress = (async () => {
+    try {
+      await runInitDatabase();
+    } finally {
+      initInProgress = null;
+    }
+  })();
+  return initInProgress;
+}
+
+async function runInitDatabase() {
   loadFromDisk();
+  const diskPacksSnapshot = new Map(packIndex);
+  const diskSongsSnapshot = new Map();
+  for (const [k, v] of songsByPack.entries()) {
+    diskSongsSnapshot.set(k, [...v]);
+  }
 
   bridgeUrl = process.env.DB_BRIDGE_URL || "";
   bridgeSecret = process.env.DB_BRIDGE_SECRET || "";
@@ -214,9 +286,9 @@ async function initDatabase() {
       const initRes = await callBridge("init");
       const existingIds = new Set(initRes.existingIds || []);
 
-      for (const [packId, pack] of packIndex.entries()) {
+      for (const [packId, pack] of diskPacksSnapshot.entries()) {
         if (!existingIds.has(packId)) {
-          const diskSongs = songsByPack.get(packId) || [];
+          const diskSongs = diskSongsSnapshot.get(packId) || [];
           console.log(`[DB-Bridge] Seeding playlist "${pack.name}" (${diskSongs.length} songs)...`);
           const chunkSize = 100;
           for (let i = 0; i < diskSongs.length; i += chunkSize) {
@@ -233,8 +305,10 @@ async function initDatabase() {
       }
 
       await reloadFromBridge();
+      await deduplicateAndRepairBridgePlaylists(diskPacksSnapshot, diskSongsSnapshot);
       dbEnabled = true;
       bridgeMode = true;
+      lastDbError = "";
       console.log(`[DB] Connected to MariaDB via PHP Bridge (${packIndex.size} playlists active).`);
       return;
     } catch (err) {
