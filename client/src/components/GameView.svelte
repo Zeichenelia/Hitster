@@ -239,16 +239,60 @@
     );
   };
 
+  const toPerceptualYouTubeVolume = (sliderVal) => {
+    const clamped = Math.max(0, Math.min(100, Number(sliderVal) || 0));
+    if (clamped <= 0) {
+      return 0;
+    }
+    return Math.max(1, Math.round(Math.pow(clamped / 100, 2.4) * 100));
+  };
+
+  const saveVolumePref = () => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("hitster:volume", String(volume));
+    }
+  };
+
   const syncVolume = () => {
+    saveVolumePref();
     if (!playerReady) {
       return;
     }
-    sendPlayerCommand("setVolume", [volume]);
-    if (volume === 0) {
+    const effectiveVolume = isMuted ? 0 : toPerceptualYouTubeVolume(volume);
+    sendPlayerCommand("setVolume", [effectiveVolume]);
+    if (effectiveVolume === 0 || isMuted) {
       sendPlayerCommand("mute");
     } else {
       sendPlayerCommand("unMute");
     }
+  };
+
+  const setSliderVolume = (nextVal) => {
+    volume = Math.max(0, Math.min(100, Math.round(nextVal)));
+    if (volume > 0) {
+      lastVolume = volume;
+      isMuted = false;
+    } else {
+      isMuted = true;
+    }
+    syncVolume();
+  };
+
+  const toggleMute = () => {
+    if (!isMuted && volume > 0) {
+      lastVolume = volume;
+      volume = 0;
+      isMuted = true;
+    } else {
+      volume = lastVolume > 0 ? lastVolume : 50;
+      isMuted = false;
+    }
+    syncVolume();
+  };
+
+  const handleVolumeWheel = (event) => {
+    const step = event.deltaY < 0 ? 3 : -3;
+    setSliderVolume((isMuted ? 0 : volume) + step);
   };
 
   const attemptPlay = () => {
@@ -259,27 +303,20 @@
     isPaused = false;
   };
 
-  const updateVolumeFromClientY = (clientY) => {
+  const updateVolumeFromClientX = (clientX) => {
     if (!volumeTrackRef) {
       return;
     }
     const rect = volumeTrackRef.getBoundingClientRect();
-    const clamped = Math.min(rect.bottom, Math.max(rect.top, clientY));
-    const ratio = 1 - (clamped - rect.top) / rect.height;
-    volume = Math.round(ratio * 100);
-    if (volume > 0) {
-      lastVolume = volume;
-      isMuted = false;
-    } else {
-      isMuted = true;
-    }
-    syncVolume();
+    const clamped = Math.min(rect.right, Math.max(rect.left, clientX));
+    const ratio = (clamped - rect.left) / rect.width;
+    setSliderVolume(ratio * 100);
   };
 
   const handleVolumePointerDown = (event) => {
-    updateVolumeFromClientY(event.clientY);
+    updateVolumeFromClientX(event.clientX);
     const handleMove = (moveEvent) => {
-      updateVolumeFromClientY(moveEvent.clientY);
+      updateVolumeFromClientX(moveEvent.clientX);
     };
     const handleUp = () => {
       window.removeEventListener("pointermove", handleMove);
@@ -483,6 +520,16 @@
   onMount(() => {
     if (typeof window !== "undefined") {
       origin = window.location.origin;
+      const storedVol = Number.parseInt(window.localStorage.getItem("hitster:volume") || "", 10);
+      if (Number.isFinite(storedVol) && storedVol >= 0 && storedVol <= 100) {
+        volume = storedVol;
+        if (storedVol > 0) {
+          lastVolume = storedVol;
+          isMuted = false;
+        } else {
+          isMuted = true;
+        }
+      }
       window.addEventListener("click", handleDocumentClick);
       window.addEventListener("message", handlePlayerMessage);
       const handleFirstInteract = () => {
@@ -561,75 +608,7 @@
       </button>
     </div>
   {/if}
-  <div class="volume-dock" bind:this={volumeDockRef}>
-    <button
-      class="volume-toggle"
-      type="button"
-      aria-label="Toggle volume"
-      on:click|stopPropagation={() => {
-        if (!showVolume) {
-          showVolume = true;
-          return;
-        }
-        if (!isMuted) {
-          if (volume > 0) {
-            lastVolume = volume;
-          }
-          volume = 0;
-          isMuted = true;
-        } else {
-          volume = lastVolume || 60;
-          isMuted = false;
-        }
-        syncVolume();
-      }}
-    >
-      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        {#if isMuted}
-          <path d="M3 9v6h4l5 4V5L7 9H3zm10.5 3l3-3 1.5 1.5-3 3 3 3L16.5 18l-3-3-3 3L9 16.5l3-3-3-3L10.5 9l3 3z" />
-        {:else}
-          <path d="M3 9v6h4l5 4V5L7 9H3zm12.5 3a3.5 3.5 0 0 0-2.05-3.18v6.36A3.5 3.5 0 0 0 15.5 12zm2.5 0a6 6 0 0 0-3.5-5.48v10.96A6 6 0 0 0 18 12z" />
-        {/if}
-      </svg>
-    </button>
-    {#if showVolume}
-      <div class="volume-panel">
-        <div
-          class="volume-slider"
-          bind:this={volumeTrackRef}
-          role="slider"
-          aria-label="Volume"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          aria-valuenow={volume}
-          tabindex="0"
-          on:pointerdown={handleVolumePointerDown}
-          on:keydown={(event) => {
-            if (event.key === "ArrowUp") {
-              volume = Math.min(100, volume + 5);
-              lastVolume = volume;
-              isMuted = false;
-              syncVolume();
-            }
-            if (event.key === "ArrowDown") {
-              volume = Math.max(0, volume - 5);
-              if (volume > 0) {
-                lastVolume = volume;
-                isMuted = false;
-              } else {
-                isMuted = true;
-              }
-              syncVolume();
-            }
-          }}
-        >
-          <div class="volume-track"></div>
-          <div class="volume-fill" style={`height: ${volume}%`}></div>
-          <div class="volume-thumb" style={`bottom: ${volume}%`}></div>
-        </div>
-      </div>
-    {/if}
-  </div>
+
   {#if currentVideoId}
     <div class="audio-hidden" aria-hidden="true">
       {#key embedUrl}
@@ -696,8 +675,52 @@
         <div class="music-progress-fill" style={`width: ${playerDuration > 0 ? (playerCurrentTime / playerDuration) * 100 : 0}%`}></div>
       </div>
       <div class="music-time-row">
-        <span>{formatTime(playerCurrentTime)}</span>
-        <span>{formatTime(playerDuration)}</span>
+        <span class="music-time-display">{formatTime(playerCurrentTime)} / {formatTime(playerDuration)}</span>
+        <div class="music-volume-mixer" on:wheel|preventDefault={handleVolumeWheel}>
+          <button
+            class="music-volume-btn"
+            type="button"
+            title={isMuted || volume === 0 ? "Stummschaltung aufheben" : "Stummschalten"}
+            aria-label="Toggle mute"
+            on:click={toggleMute}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              {#if isMuted || volume === 0}
+                <path d="M3 9v6h4l5 4V5L7 9H3zm10.5 3l3-3 1.5 1.5-3 3 3 3L16.5 18l-3-3-3 3L9 16.5l3-3-3-3L10.5 9l3 3z" />
+              {:else if volume < 45}
+                <path d="M3 9v6h4l5 4V5L7 9H3zm12.5 3a3.5 3.5 0 0 0-2.05-3.18v6.36A3.5 3.5 0 0 0 15.5 12z" />
+              {:else}
+                <path d="M3 9v6h4l5 4V5L7 9H3zm12.5 3a3.5 3.5 0 0 0-2.05-3.18v6.36A3.5 3.5 0 0 0 15.5 12zm2.5 0a6 6 0 0 0-3.5-5.48v10.96A6 6 0 0 0 18 12z" />
+              {/if}
+            </svg>
+          </button>
+          <div
+            class="music-volume-slider"
+            bind:this={volumeTrackRef}
+            role="slider"
+            aria-label="Lautstärke"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow={isMuted ? 0 : volume}
+            tabindex="0"
+            on:pointerdown={handleVolumePointerDown}
+            on:keydown={(event) => {
+              if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+                event.preventDefault();
+                setSliderVolume((isMuted ? 0 : volume) + 2);
+              }
+              if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+                event.preventDefault();
+                setSliderVolume((isMuted ? 0 : volume) - 2);
+              }
+            }}
+          >
+            <div class="music-volume-track"></div>
+            <div class="music-volume-fill" style={`width: ${isMuted ? 0 : volume}%`}></div>
+            <div class="music-volume-thumb" style={`left: ${isMuted ? 0 : volume}%`}></div>
+          </div>
+          <span class="music-volume-value">{isMuted ? 0 : volume}%</span>
+        </div>
       </div>
     </div>
   {/if}
@@ -1292,6 +1315,89 @@
       transform: scale(1);
       opacity: 1;
     }
+  }
+
+  .music-time-display {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .music-volume-mixer {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .music-volume-btn {
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    border: 0;
+    background: transparent;
+    color: #ffd9f0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .music-volume-btn:hover {
+    background: rgba(255, 110, 200, 0.18);
+  }
+
+  .music-volume-btn svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+  }
+
+  .music-volume-slider {
+    position: relative;
+    width: 96px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    touch-action: none;
+  }
+
+  .music-volume-track {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 5px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .music-volume-fill {
+    position: absolute;
+    left: 0;
+    height: 5px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #ff6ec8, #ff9ee2);
+  }
+
+  .music-volume-thumb {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #ffd9f0;
+    border: 1.5px solid #ff3bd4;
+    box-shadow: 0 2px 8px rgba(255, 59, 212, 0.55);
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  .music-volume-value {
+    font-size: 0.7rem;
+    min-width: 28px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: rgba(236, 240, 255, 0.8);
   }
 </style>
 
