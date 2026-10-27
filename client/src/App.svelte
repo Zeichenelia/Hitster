@@ -52,6 +52,19 @@
   let winnerTeamId = "";
   let showWinner = false;
   let winnerTimer;
+  let toastMessage = "";
+  let toastTimer;
+
+  const showToast = (msg) => {
+    toastMessage = msg;
+    if (toastTimer) {
+      clearTimeout(toastTimer);
+    }
+    toastTimer = setTimeout(() => {
+      toastMessage = "";
+      toastTimer = null;
+    }, 4000);
+  };
   let storedTeamId = "";
   let clientId = "";
   let localPrefsReady = false;
@@ -273,6 +286,31 @@
     remainingCards = payload.remainingCards ?? remainingCards;
     pendingPlacement = null;
     audioState = payload.audioState || null;
+    if (payload.autoSkipped) {
+      showToast("Video nicht verfügbar – neuer Song wurde automatisch gezogen.");
+    }
+  });
+
+  socket.on("player:kicked", () => {
+    roomCode = "";
+    isHost = false;
+    hasJoined = false;
+    storedTeamId = "";
+    players = [];
+    teams = [];
+    currentCard = null;
+    playerCard = null;
+    audioUrl = "";
+    audioState = null;
+    gameState = "lobby";
+    view = "create";
+    lastError = "Du wurdest vom Host aus dem Raum entfernt.";
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("hitster:teamId");
+      const url = new URL(window.location.href);
+      url.searchParams.delete("room");
+      window.history.replaceState({}, "", url);
+    }
   });
 
   socket.on("game:card-placed", (payload) => {
@@ -522,6 +560,20 @@
     socket.emit("game:host-soft-reset", { roomCode, randomizeTeams });
   }
 
+  function kickPlayer(playerId) {
+    if (!roomCode || !isHost || !playerId) {
+      return;
+    }
+    socket.emit("player:kick", { roomCode, playerId });
+  }
+
+  function reportBrokenSong(cardId, errorCode) {
+    if (!roomCode || !cardId) {
+      return;
+    }
+    socket.emit("game:report-broken-song", { roomCode, cardId, errorCode });
+  }
+
   function placeCard(position) {
     if (!roomCode) {
       lastError = "room code required";
@@ -703,6 +755,8 @@
       onHostSkipSong={hostSkipSong}
       onHostSoftReset={hostSoftReset}
       onReturnToLobby={returnToLobby}
+      onBrokenSong={reportBrokenSong}
+      onKickPlayer={kickPlayer}
     />
   {:else}
     <LobbyView
@@ -725,9 +779,16 @@
       onStartGame={startGame}
       onRandomizeTeams={randomizeTeams}
       onNextTurn={nextTurn}
+      onKickPlayer={kickPlayer}
     />
   {/if}
 </main>
+
+{#if toastMessage}
+  <div class="toast-banner" role="status" aria-live="polite">
+    {toastMessage}
+  </div>
+{/if}
 
 {#if (gameState === "playing" || gameState === "finished") && !hasJoined}
   <JoinModal bind:joinName onJoin={joinRoom} />
@@ -1485,6 +1546,11 @@
     transition: width 0.4s var(--springy-ease), margin-right 0.4s var(--springy-ease);
   }
 
+  :global(.timeline-slot.drop-slot.tap-ready) {
+    width: 36px;
+    margin-right: 12px;
+  }
+
   :global(.timeline-slot.drop-slot.show-drop) {
     width: var(--timeline-card-width);
     margin-right: 12px;
@@ -1506,9 +1572,46 @@
       transform 1s var(--springy-ease);
   }
 
+  :global(.timeline-slot.drop-slot.tap-ready .timeline-drop) {
+    opacity: 0.88;
+    transform: scale(1);
+    cursor: pointer;
+    border-color: rgba(80, 255, 150, 0.42);
+    background: rgba(80, 255, 150, 0.06);
+    color: rgba(190, 255, 220, 0.9);
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  :global(.timeline-slot.drop-slot.tap-ready .timeline-drop:hover) {
+    border-color: rgba(255, 110, 200, 0.7);
+    background: rgba(255, 110, 200, 0.14);
+    color: #ffd9f0;
+  }
+
   :global(.timeline-slot.drop-slot.show-drop .timeline-drop) {
     opacity: 1;
     transform: scale(1);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  :global(.toast-banner) {
+    position: fixed;
+    bottom: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    background: rgba(24, 14, 34, 0.95);
+    border: 1px solid rgba(255, 115, 224, 0.55);
+    color: #ffd9f0;
+    padding: 10px 18px;
+    border-radius: 999px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    max-width: min(520px, 90vw);
   }
 
   :global(.timeline-drop.active) {

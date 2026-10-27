@@ -20,6 +20,7 @@
   export let onStartGame = () => {};
   export let onRandomizeTeams = () => {};
   export let onNextTurn = () => {};
+  export let onKickPlayer = () => {};
 
   let inviteCopied = false;
   let inviteCopiedTimer;
@@ -156,9 +157,26 @@
                 {#each playersByTeam[team.id] as player}
                   <div
                     class="player-card"
+                    class:offline={player.connected === false}
                     style={`--player-glow: ${playerColors[player.id] || "#3df0ff"}`}
                   >
-                    {player.name}
+                    <span class="player-card-name">
+                      {player.name}
+                      {#if player.connected === false}
+                        <span class="player-offline-badge">offline</span>
+                      {/if}
+                    </span>
+                    {#if isHost && player.id !== socketId}
+                      <button
+                        class="player-kick-btn"
+                        type="button"
+                        title="Spieler entfernen"
+                        aria-label={`Remove ${player.name}`}
+                        on:click={() => onKickPlayer(player.id)}
+                      >
+                        ✕
+                      </button>
+                    {/if}
                   </div>
                 {/each}
               </div>
@@ -195,9 +213,26 @@
             {#each unassignedPlayers as player}
               <div
                 class="player-card"
+                class:offline={player.connected === false}
                 style={`--player-glow: ${playerColors[player.id] || "#3df0ff"}`}
               >
-                {player.name}
+                <span class="player-card-name">
+                  {player.name}
+                  {#if player.connected === false}
+                    <span class="player-offline-badge">offline</span>
+                  {/if}
+                </span>
+                {#if isHost && player.id !== socketId}
+                  <button
+                    class="player-kick-btn"
+                    type="button"
+                    title="Spieler entfernen"
+                    aria-label={`Remove ${player.name}`}
+                    on:click={() => onKickPlayer(player.id)}
+                  >
+                    ✕
+                  </button>
+                {/if}
               </div>
             {/each}
           </div>
@@ -286,9 +321,26 @@
                 {#each playersByTeam[team.id] as player}
                   <div
                     class="player-card"
+                    class:offline={player.connected === false}
                     style={`--player-glow: ${playerColors[player.id] || "#3df0ff"}`}
                   >
-                    {player.name}
+                    <span class="player-card-name">
+                      {player.name}
+                      {#if player.connected === false}
+                        <span class="player-offline-badge">offline</span>
+                      {/if}
+                    </span>
+                    {#if isHost && player.id !== socketId}
+                      <button
+                        class="player-kick-btn"
+                        type="button"
+                        title="Spieler entfernen"
+                        aria-label={`Remove ${player.name}`}
+                        on:click={() => onKickPlayer(player.id)}
+                      >
+                        ✕
+                      </button>
+                    {/if}
                   </div>
                 {/each}
               </div>
@@ -339,6 +391,57 @@
   .team-name-input {
     width: min(180px, 100%);
     text-align: center;
+  }
+
+  .player-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .player-card.offline {
+    opacity: 0.62;
+  }
+
+  .player-card-name {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 0;
+    word-break: break-word;
+  }
+
+  .player-offline-badge {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.75);
+  }
+
+  .player-kick-btn {
+    padding: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    background: rgba(255, 80, 110, 0.18);
+    border: 1px solid rgba(255, 110, 140, 0.45);
+    color: #ffd6e0;
+    font-size: 11px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .player-kick-btn:hover {
+    background: rgba(255, 80, 110, 0.38);
   }
 </style>
 

@@ -28,8 +28,12 @@
   export let onHostSkipSong = () => {};
   export let onHostSoftReset = () => {};
   export let onReturnToLobby = () => {};
+  export let onBrokenSong = () => {};
+  export let onKickPlayer = () => {};
 
   const timelineSlots = 6;
+  let tapSelectActive = false;
+  let lastReportedBrokenCardId = "";
   const logoSrc = "/assets/hitster-logo.png";
   const dragType = "application/x-hitster-card";
   let drawnCardRef;
@@ -151,6 +155,16 @@
       return;
     }
     hoveredDrop = null;
+    tapSelectActive = false;
+    onPlaceCard(position);
+  };
+
+  const handleTapPlace = (teamId, position) => {
+    if (!currentCard || myTeamId !== activeTeamId || teamId !== activeTeamId) {
+      return;
+    }
+    hoveredDrop = null;
+    tapSelectActive = false;
     onPlaceCard(position);
   };
 
@@ -399,10 +413,24 @@
     } catch (error) {
       return;
     }
+    if (payload?.event === "onError") {
+      if (currentCard?.id && currentCard.id !== lastReportedBrokenCardId) {
+        lastReportedBrokenCardId = currentCard.id;
+        onBrokenSong(currentCard.id, payload.info);
+      }
+      return;
+    }
     if (payload?.event !== "infoDelivery") {
       return;
     }
     const info = payload.info || {};
+    if (info.videoData && info.videoData.isPlayable === false) {
+      if (currentCard?.id && currentCard.id !== lastReportedBrokenCardId) {
+        lastReportedBrokenCardId = currentCard.id;
+        onBrokenSong(currentCard.id, "UNPLAYABLE");
+      }
+      return;
+    }
     if (Number.isFinite(info.currentTime)) {
       playerCurrentTime = info.currentTime;
     }
@@ -413,6 +441,13 @@
       isPaused = info.playerState !== 1;
     }
   };
+
+  $: if (!currentCard) {
+    tapSelectActive = false;
+  } else if (!getYouTubeId(currentCard.url) && currentCard.id !== lastReportedBrokenCardId) {
+    lastReportedBrokenCardId = currentCard.id;
+    onBrokenSong(currentCard.id, "INVALID_URL");
+  }
 
   const handleDocumentClick = (event) => {
     if (showVolume && volumeDockRef && !volumeDockRef.contains(event.target)) {
@@ -589,6 +624,10 @@
             syncVolume();
             attemptPlay();
             playerRef?.contentWindow?.postMessage(JSON.stringify({ event: "listening" }), "*");
+            playerRef?.contentWindow?.postMessage(
+              JSON.stringify({ event: "command", func: "addEventListener", args: ["onError"] }),
+              "https://www.youtube.com"
+            );
             syncPlaybackProgress();
           }}
         ></iframe>
@@ -644,11 +683,23 @@
   {#if currentCard}
     <div
       class="drawn-card"
+      class:tap-selected={tapSelectActive && isActiveTeamMember}
       bind:this={drawnCardRef}
       draggable={isActiveTeamMember}
       role="button"
       tabindex="0"
-      aria-label="Drag card to timeline"
+      aria-label="Drag or tap card to place on timeline"
+      on:click={() => {
+        if (isActiveTeamMember) {
+          tapSelectActive = !tapSelectActive;
+        }
+      }}
+      on:keydown={(event) => {
+        if (isActiveTeamMember && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          tapSelectActive = !tapSelectActive;
+        }
+      }}
       on:dragstart={handleDragStart}
       on:dragend={() => {
         hoveredDrop = null;
@@ -659,6 +710,9 @@
       }}
     >
       <img class="timeline-logo" src={logoSrc} alt="Hitster" />
+      {#if isActiveTeamMember}
+        <span class="drawn-card-hint">{tapSelectActive ? "Slot antippen" : "Ziehen / Tippen"}</span>
+      {/if}
     </div>
   {/if}
   <div class="drag-ghost-template" bind:this={dragGhostTemplate} aria-hidden="true">
@@ -713,9 +767,24 @@
                 {#each playersByTeam[team.id] || [] as player}
                   <span
                     class="player-pill"
+                    class:offline={player.connected === false}
                     style={`--player-glow: ${playerColors[player.id] || "#3df0ff"}`}
                   >
                     {player.name}
+                    {#if player.connected === false}
+                      <span class="pill-offline">offline</span>
+                    {/if}
+                    {#if isHost && player.id !== socketId && player.connected === false}
+                      <button
+                        class="pill-kick-btn"
+                        type="button"
+                        title="Offline-Spieler entfernen"
+                        aria-label={`Remove ${player.name}`}
+                        on:click={() => onKickPlayer(player.id)}
+                      >
+                        ✕
+                      </button>
+                    {/if}
                   </span>
                 {/each}
               </div>
@@ -739,18 +808,40 @@
                     hoveredDrop &&
                     hoveredDrop.teamId === team.id &&
                     hoveredDrop.position === position}
-                  <div class="timeline-slot drop-slot" class:show-drop={isHover}>
+                  {@const canTapSlot =
+                    isActiveTeamMember &&
+                    Boolean(currentCard) &&
+                    team.id === activeTeamId &&
+                    (!pendingPlacement || pendingPlacement.position !== position)}
+                  <div
+                    class="timeline-slot drop-slot"
+                    class:tap-ready={canTapSlot}
+                    class:show-drop={isHover || (tapSelectActive && canTapSlot)}
+                  >
                     <div
                       class="timeline-drop"
-                      class:active={isHover}
+                      class:active={isHover || (tapSelectActive && canTapSlot)}
                       role="button"
-                      tabindex="0"
-                      aria-label="Drop card here"
+                      tabindex={canTapSlot ? 0 : -1}
+                      aria-label="Place card here"
+                      on:click={() => handleTapPlace(team.id, position)}
+                      on:keydown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          handleTapPlace(team.id, position);
+                        }
+                      }}
                       on:dragover={(event) => handleDragOver(event, team.id, position)}
                       on:dragleave={(event) => handleDragLeave(event, team.id, position)}
                       on:drop={(event) => handleDrop(event, team.id, position)}
                     >
-                      <span class="timeline-drop-label">Drop here</span>
+                      <span class="timeline-drop-label">
+                        {#if isHover || (tapSelectActive && canTapSlot)}
+                          Drop here
+                        {:else}
+                          +
+                        {/if}
+                      </span>
                     </div>
                   </div>
                   {#if pendingPlacement && team.id === pendingPlacement.teamId && position === pendingPlacement.position}
@@ -760,10 +851,22 @@
                       {/if}
                       <div
                         class="timeline-card back pending-drag"
+                        class:tap-selected={tapSelectActive && isActiveTeamMember}
                         draggable={isActiveTeamMember}
                         role="button"
                         tabindex="0"
-                        aria-label="Drag placed card to reposition"
+                        aria-label="Drag or tap placed card to reposition"
+                        on:click={() => {
+                          if (isActiveTeamMember) {
+                            tapSelectActive = !tapSelectActive;
+                          }
+                        }}
+                        on:keydown={(event) => {
+                          if (isActiveTeamMember && (event.key === "Enter" || event.key === " ")) {
+                            event.preventDefault();
+                            tapSelectActive = !tapSelectActive;
+                          }
+                        }}
                         on:dragstart={handleDragStart}
                         on:dragend={() => {
                           hoveredDrop = null;
@@ -825,7 +928,23 @@
           <strong>Unassigned</strong>
           <div class="team-players">
             {#each unassignedPlayers as player}
-              <span class="player-pill">{player.name}</span>
+              <span class="player-pill" class:offline={player.connected === false}>
+                {player.name}
+                {#if player.connected === false}
+                  <span class="pill-offline">offline</span>
+                {/if}
+                {#if isHost && player.id !== socketId}
+                  <button
+                    class="pill-kick-btn"
+                    type="button"
+                    title="Spieler entfernen"
+                    aria-label={`Remove ${player.name}`}
+                    on:click={() => onKickPlayer(player.id)}
+                  >
+                    ✕
+                  </button>
+                {/if}
+              </span>
             {/each}
           </div>
         </div>
@@ -952,6 +1071,59 @@
 
   .host-menu-panel button:hover {
     background: rgba(255, 255, 255, 0.14);
+  }
+
+  .drawn-card.tap-selected,
+  .timeline-card.pending-drag.tap-selected {
+    border-color: rgba(80, 255, 150, 0.9);
+    box-shadow: 0 0 0 2px rgba(80, 255, 150, 0.35), 0 0 20px rgba(80, 255, 150, 0.35);
+  }
+
+  .drawn-card-hint {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: rgba(255, 214, 240, 0.82);
+    text-align: center;
+    padding: 0 6px;
+  }
+
+  .player-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .player-pill.offline {
+    opacity: 0.6;
+  }
+
+  .pill-offline {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.14);
+  }
+
+  .pill-kick-btn {
+    padding: 0;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    background: rgba(255, 80, 110, 0.22);
+    border: 1px solid rgba(255, 110, 140, 0.5);
+    color: #ffd6e0;
+    font-size: 10px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .pill-kick-btn:hover {
+    background: rgba(255, 80, 110, 0.42);
   }
 </style>
 

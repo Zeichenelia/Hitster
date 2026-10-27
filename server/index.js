@@ -158,6 +158,16 @@ function createAudioState(card) {
     updatedAt: Date.now(),
   };
 }
+function drawValidCard(room) {
+  while (room.deck.length > 0) {
+    const candidate = room.deck.pop();
+    if (getYouTubeId(candidate?.url || "")) {
+      return candidate;
+    }
+    room.discard.push(candidate);
+  }
+  return null;
+}
 
 function broadcastRoomState(roomCode, room) {
   room.version += 1;
@@ -648,6 +658,35 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on("player:kick", ({ roomCode, playerId } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room) {
+      socket.emit("error", { code: "ROOM_NOT_FOUND", message: "Room not found" });
+      return;
+    }
+    if (socket.id !== room.hostId) {
+      socket.emit("error", { code: "NOT_HOST", message: "Only the host can kick players" });
+      return;
+    }
+    if (!playerId || playerId === room.hostId) {
+      socket.emit("error", { code: "INVALID_PLAYER", message: "Cannot kick the host" });
+      return;
+    }
+    if (!room.players.has(playerId)) {
+      return;
+    }
+    room.players.delete(playerId);
+    io.to(playerId).emit("player:kicked", { roomCode });
+    const targetSocket = io.sockets.sockets.get(playerId);
+    if (targetSocket) {
+      targetSocket.leave(roomCode);
+    }
+    io.to(roomCode).emit("room:players", {
+      players: Array.from(room.players.values()),
+    });
+    broadcastRoomState(roomCode, room);
+  });
+
   socket.on("game:start", ({ roomCode, randomizeTeams } = {}) => {
     const room = rooms.get(roomCode);
     if (!room) {
@@ -844,11 +883,7 @@ io.on("connection", (socket) => {
       return;
     }
 
-    if (room.pendingPlacement) {
-      socket.emit("error", { code: "PLACEMENT_PENDING", message: "Resolve placement before skipping" });
-      return;
-    }
-
+    room.pendingPlacement = null;
     room.discard.push(room.currentCard);
 
     if (room.deck.length === 0) {
@@ -861,7 +896,16 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const nextCard = room.deck.pop();
+    const nextCard = drawValidCard(room);
+    if (!nextCard) {
+      room.currentCard = null;
+      room.audioState = null;
+      room.audioSyncAuthorityId = null;
+      room.audioSyncAuthorityUpdatedAt = 0;
+      io.to(roomCode).emit("game:deck-empty", { remainingCards: 0 });
+      broadcastRoomState(roomCode, room);
+      return;
+    }
     room.currentCard = nextCard;
     room.audioState = createAudioState(nextCard);
     room.audioSyncAuthorityId = null;
@@ -871,6 +915,48 @@ io.on("connection", (socket) => {
       activeTeamId: room.activeTeamId,
       card: serializeCardForClient(nextCard),
       remainingCards: room.deck.length,
+      audioState: room.audioState,
+    });
+    broadcastRoomState(roomCode, room);
+  });
+
+  socket.on("game:report-broken-song", ({ roomCode, cardId } = {}) => {
+    const room = rooms.get(roomCode);
+    if (!room || room.state !== "playing" || !room.currentCard) {
+      return;
+    }
+    if (!room.players.has(socket.id)) {
+      return;
+    }
+    if (cardId && room.currentCard.id !== cardId) {
+      return;
+    }
+
+    room.discard.push(room.currentCard);
+    room.pendingPlacement = null;
+
+    const nextCard = drawValidCard(room);
+    if (!nextCard) {
+      room.currentCard = null;
+      room.audioState = null;
+      room.audioSyncAuthorityId = null;
+      room.audioSyncAuthorityUpdatedAt = 0;
+      io.to(roomCode).emit("game:deck-empty", { remainingCards: 0 });
+      broadcastRoomState(roomCode, room);
+      return;
+    }
+
+    room.currentCard = nextCard;
+    room.audioState = createAudioState(nextCard);
+    room.audioSyncAuthorityId = null;
+    room.audioSyncAuthorityUpdatedAt = 0;
+
+    io.to(roomCode).emit("game:host-song-skipped", {
+      activeTeamId: room.activeTeamId,
+      card: serializeCardForClient(nextCard),
+      remainingCards: room.deck.length,
+      audioState: room.audioState,
+      autoSkipped: true,
     });
     broadcastRoomState(roomCode, room);
   });
@@ -912,8 +998,8 @@ io.on("connection", (socket) => {
       room.pendingDiscard = null;
     }
 
-    if (room.deck.length !== 0) {
-      const nextCard = room.deck.pop();
+    const nextCard = drawValidCard(room);
+    if (nextCard) {
       room.currentCard = nextCard;
       room.audioState = createAudioState(nextCard);
       room.audioSyncAuthorityId = null;
