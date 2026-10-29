@@ -88,14 +88,16 @@
   let draftTitle = "";
   let editingBonusField = "";
   let lastGuessCardId = "";
+  let isEnded = false;
+  let lastSyncedAudioKey = "";
   let flippedCards = {};
   let cardStatsById = {};
   let cardStatsLoading = {};
 
   const getTendencyLabel = (tendency) => {
-    if (tendency === "too_old") return "↘ meist älter geschätzt";
-    if (tendency === "too_new") return "↗ meist jünger geschätzt";
-    if (tendency === "balanced") return "↔ ausgeglichen";
+    if (tendency === "too_old") return "Meist älter geschätzt";
+    if (tendency === "too_new") return "Meist jünger geschätzt";
+    if (tendency === "balanced") return "Ausgeglichen geschätzt";
     return "";
   };
 
@@ -446,6 +448,8 @@
     playerCurrentTime = 0;
     playerDuration = 0;
     isPaused = false;
+    isEnded = false;
+    lastSyncedAudioKey = "";
   }
 
   $: displayCard = playerCard || currentCard;
@@ -461,20 +465,30 @@
   }
 
   $: if (audioState && playerReady && currentVideoId && audioState.videoId === currentVideoId) {
-    const baseTime = Number.isFinite(Number(audioState.currentTime)) ? Math.max(0, Number(audioState.currentTime)) : 0;
-    const elapsed = audioState.isPaused ? 0 : Math.max(0, (Date.now() - Number(audioState.updatedAt || Date.now())) / 1000);
-    const targetTime = baseTime + elapsed;
-    if (Math.abs(targetTime - playerCurrentTime) > 1.2) {
-      sendPlayerCommand("seekTo", [targetTime, true]);
-      playerCurrentTime = targetTime;
-    }
-    if (Boolean(audioState.isPaused) !== isPaused) {
-      if (audioState.isPaused) {
-        sendPlayerCommand("pauseVideo");
+    const syncKey = `${audioState.videoId}:${audioState.updatedAt || 0}:${audioState.isPaused ? 1 : 0}:${Math.round(Number(audioState.currentTime) || 0)}`;
+    if (syncKey !== lastSyncedAudioKey) {
+      lastSyncedAudioKey = syncKey;
+      const baseTime = Number.isFinite(Number(audioState.currentTime)) ? Math.max(0, Number(audioState.currentTime)) : 0;
+      const elapsed = audioState.isPaused ? 0 : Math.max(0, (Date.now() - Number(audioState.updatedAt || Date.now())) / 1000);
+      const targetTime = baseTime + elapsed;
+      if (isEnded || (playerDuration > 0 && targetTime >= playerDuration - 0.5)) {
+        isEnded = true;
         isPaused = true;
+        sendPlayerCommand("pauseVideo");
       } else {
-        sendPlayerCommand("playVideo");
-        isPaused = false;
+        if (Math.abs(targetTime - playerCurrentTime) > 1.2) {
+          sendPlayerCommand("seekTo", [targetTime, true]);
+          playerCurrentTime = targetTime;
+        }
+        if (Boolean(audioState.isPaused) !== isPaused) {
+          if (audioState.isPaused) {
+            sendPlayerCommand("pauseVideo");
+            isPaused = true;
+          } else {
+            sendPlayerCommand("playVideo");
+            isPaused = false;
+          }
+        }
       }
     }
   }
@@ -495,6 +509,9 @@
       return;
     }
     const nextTime = Math.max(0, Math.min(playerDuration || Infinity, playerCurrentTime + seconds));
+    if (!playerDuration || nextTime < playerDuration - 0.5) {
+      isEnded = false;
+    }
     sendPlayerCommand("seekTo", [nextTime, true]);
     playerCurrentTime = nextTime;
     emitAudioSync({ currentTime: nextTime, isPaused, interaction: true });
@@ -505,9 +522,16 @@
       return;
     }
     if (isPaused) {
+      let startAt = playerCurrentTime;
+      if (isEnded || (playerDuration > 0 && playerCurrentTime >= playerDuration - 1)) {
+        isEnded = false;
+        startAt = 0;
+        playerCurrentTime = 0;
+        sendPlayerCommand("seekTo", [0, true]);
+      }
       sendPlayerCommand("playVideo");
       isPaused = false;
-      emitAudioSync({ isPaused: false, interaction: true });
+      emitAudioSync({ currentTime: startAt, isPaused: false, interaction: true });
       return;
     }
     sendPlayerCommand("pauseVideo");
@@ -516,7 +540,7 @@
   };
 
   const syncPlaybackProgress = () => {
-    if (!playerReady) {
+    if (!playerReady || isEnded) {
       return;
     }
     sendPlayerCommand("getCurrentTime");
@@ -529,6 +553,9 @@
       return;
     }
     const nextTime = Math.max(0, Math.min(playerDuration, ratio * playerDuration));
+    if (nextTime < playerDuration - 0.5) {
+      isEnded = false;
+    }
     sendPlayerCommand("seekTo", [nextTime, true]);
     playerCurrentTime = nextTime;
     emitAudioSync({ currentTime: nextTime, isPaused, interaction: true });
@@ -593,6 +620,15 @@
       }
       return;
     }
+    if (payload?.event === "onStateChange" && payload.info === 0) {
+      isEnded = true;
+      isPaused = true;
+      if (playerDuration > 0) {
+        playerCurrentTime = playerDuration;
+      }
+      sendPlayerCommand("pauseVideo");
+      return;
+    }
     if (payload?.event !== "infoDelivery") {
       return;
     }
@@ -604,14 +640,33 @@
       }
       return;
     }
-    if (Number.isFinite(info.currentTime)) {
-      playerCurrentTime = info.currentTime;
-    }
     if (Number.isFinite(info.duration) && info.duration > 0) {
       playerDuration = info.duration;
     }
+    if (Number.isFinite(info.currentTime)) {
+      playerCurrentTime = info.currentTime;
+      if (playerDuration > 0 && info.currentTime >= playerDuration - 0.25 && !isEnded) {
+        isEnded = true;
+        isPaused = true;
+        playerCurrentTime = playerDuration;
+        sendPlayerCommand("pauseVideo");
+        return;
+      }
+    }
     if (Number.isInteger(info.playerState)) {
-      isPaused = info.playerState !== 1;
+      if (info.playerState === 0) {
+        isEnded = true;
+        isPaused = true;
+        if (playerDuration > 0) {
+          playerCurrentTime = playerDuration;
+        }
+        sendPlayerCommand("pauseVideo");
+      } else {
+        isPaused = info.playerState !== 1;
+        if (info.playerState === 1 && (!playerDuration || playerCurrentTime < playerDuration - 0.5)) {
+          isEnded = false;
+        }
+      }
     }
   };
 
@@ -743,6 +798,10 @@
             playerRef?.contentWindow?.postMessage(JSON.stringify({ event: "listening" }), "*");
             playerRef?.contentWindow?.postMessage(
               JSON.stringify({ event: "command", func: "addEventListener", args: ["onError"] }),
+              "https://www.youtube.com"
+            );
+            playerRef?.contentWindow?.postMessage(
+              JSON.stringify({ event: "command", func: "addEventListener", args: ["onStateChange"] }),
               "https://www.youtube.com"
             );
             syncPlaybackProgress();
@@ -1253,64 +1312,73 @@
                           }
                         }}
                       >
-                        {#if isRevealFlipped}
-                          <div class="card-stats-face">
-                            <div class="card-stats-top">
-                              <span class={`diff-badge diff-${revealStats?.difficulty?.level || "new"}`}>
-                                {revealStats?.difficulty?.label || "Neu"}
-                              </span>
-                              <span class="stats-plays">{revealStats?.plays ?? 0}× gespielt</span>
+                        <div class="card-flipper">
+                          <div class="card-face card-face-front">
+                            <span class="card-flip-badge" aria-hidden="true">
+                              <svg viewBox="0 0 16 16" focusable="false">
+                                <rect x="2" y="9" width="2.6" height="5" rx="1" />
+                                <rect x="6.7" y="5.5" width="2.6" height="8.5" rx="1" />
+                                <rect x="11.4" y="2" width="2.6" height="12" rx="1" />
+                              </svg>
+                            </span>
+                            <div class="timeline-top">
+                              <span class="timeline-artist">{lastRevealedCard.artist || "Unknown"}</span>
                             </div>
-                            {#if revealLoading && !revealStats}
-                              <div class="card-stats-empty">Lade Statistik...</div>
-                            {:else if !revealStats || revealStats.plays === 0}
-                              <div class="card-stats-empty">Noch keine Runden-Statistik</div>
-                            {:else}
-                              <div class="card-stats-hero">
-                                <span class="stats-rate-value">{revealStats.correctRate ?? 0}%</span>
-                                <span class="stats-rate-label">Jahr richtig</span>
+                            <div class="timeline-center">
+                              <div class="timeline-year">{lastRevealedCard.year ?? "????"}</div>
+                            </div>
+                            <div class="timeline-title">{lastRevealedCard.title || "Unknown"}</div>
+                          </div>
+                          <div class="card-face card-face-back">
+                            <div class="card-stats-face">
+                              <div class="card-stats-top">
+                                <span class={`diff-badge diff-${revealStats?.difficulty?.level || "new"}`}>
+                                  {revealStats?.difficulty?.label || "Neu"}
+                                </span>
+                                <span class="stats-plays">{revealStats?.plays ?? 0}×</span>
                               </div>
-                              <div class="card-stats-list">
-                                {#if revealStats.avgYearError !== null}
-                                  <div class="stats-row">
-                                    <span>Ø Abweichung:</span>
-                                    <strong>±{revealStats.avgYearError} J.</strong>
-                                  </div>
-                                  {#if revealStats.tendency}
-                                    <div class="stats-tendency">{getTendencyLabel(revealStats.tendency)}</div>
+                              {#if revealLoading && !revealStats}
+                                <div class="card-stats-empty">Lade Statistik...</div>
+                              {:else if !revealStats || revealStats.plays === 0}
+                                <div class="card-stats-empty">Noch keine Runden-Statistik</div>
+                              {:else}
+                                <div class="card-stats-hero">
+                                  <span class="stats-rate-value">{revealStats.correctRate ?? 0}%</span>
+                                  <span class="stats-rate-label">Jahr richtig</span>
+                                </div>
+                                <div class="card-stats-list">
+                                  {#if revealStats.avgYearError !== null}
+                                    <div class="stats-row">
+                                      <span>Ø Daneben</span>
+                                      <strong>±{revealStats.avgYearError} J.</strong>
+                                    </div>
+                                    {#if revealStats.tendency}
+                                      <div class="stats-tendency">{getTendencyLabel(revealStats.tendency)}</div>
+                                    {/if}
                                   {/if}
-                                {/if}
-                                {#if revealStats.artistRate !== null}
-                                  <div class="stats-row">
-                                    <span>🎤 Interpret:</span>
-                                    <strong>{revealStats.artistRate}%</strong>
-                                  </div>
-                                {/if}
-                                {#if revealStats.titleRate !== null}
-                                  <div class="stats-row">
-                                    <span>🎵 Titel:</span>
-                                    <strong>{revealStats.titleRate}%</strong>
-                                  </div>
-                                {/if}
-                                {#if revealStats.avgDecisionSec !== null}
-                                  <div class="stats-row">
-                                    <span>⏱ Ø Zeit:</span>
-                                    <strong>{revealStats.avgDecisionSec}s</strong>
-                                  </div>
-                                {/if}
-                              </div>
-                            {/if}
+                                  {#if revealStats.artistRate !== null}
+                                    <div class="stats-row">
+                                      <span>Interpret</span>
+                                      <strong>{revealStats.artistRate}%</strong>
+                                    </div>
+                                  {/if}
+                                  {#if revealStats.titleRate !== null}
+                                    <div class="stats-row">
+                                      <span>Songtitel</span>
+                                      <strong>{revealStats.titleRate}%</strong>
+                                    </div>
+                                  {/if}
+                                  {#if revealStats.avgDecisionSec !== null}
+                                    <div class="stats-row">
+                                      <span>Ø Bedenkzeit</span>
+                                      <strong>{revealStats.avgDecisionSec}s</strong>
+                                    </div>
+                                  {/if}
+                                </div>
+                              {/if}
+                            </div>
                           </div>
-                        {:else}
-                          <span class="card-flip-icon" aria-hidden="true">📊</span>
-                          <div class="timeline-top">
-                            <span class="timeline-artist">{lastRevealedCard.artist || "Unknown"}</span>
-                          </div>
-                          <div class="timeline-center">
-                            <div class="timeline-year">{lastRevealedCard.year ?? "????"}</div>
-                          </div>
-                          <div class="timeline-title">{lastRevealedCard.title || "Unknown"}</div>
-                        {/if}
+                        </div>
                       </div>
                     </div>
                   {/if}
@@ -1339,64 +1407,73 @@
                             }
                           }}
                         >
-                          {#if isCardFlipped}
-                            <div class="card-stats-face">
-                              <div class="card-stats-top">
-                                <span class={`diff-badge diff-${cardStats?.difficulty?.level || "new"}`}>
-                                  {cardStats?.difficulty?.label || "Neu"}
-                                </span>
-                                <span class="stats-plays">{cardStats?.plays ?? 0}×</span>
+                          <div class="card-flipper">
+                            <div class="card-face card-face-front">
+                              <span class="card-flip-badge" aria-hidden="true">
+                                <svg viewBox="0 0 16 16" focusable="false">
+                                  <rect x="2" y="9" width="2.6" height="5" rx="1" />
+                                  <rect x="6.7" y="5.5" width="2.6" height="8.5" rx="1" />
+                                  <rect x="11.4" y="2" width="2.6" height="12" rx="1" />
+                                </svg>
+                              </span>
+                              <div class="timeline-top">
+                                <span class="timeline-artist">{card.artist || "Unknown"}</span>
                               </div>
-                              {#if isStatsLoading && !cardStats}
-                                <div class="card-stats-empty">Lade Statistik...</div>
-                              {:else if !cardStats || cardStats.plays === 0}
-                                <div class="card-stats-empty">Startkarte / Noch keine Statistik</div>
-                              {:else}
-                                <div class="card-stats-hero">
-                                  <span class="stats-rate-value">{cardStats.correctRate ?? 0}%</span>
-                                  <span class="stats-rate-label">Jahr richtig</span>
+                              <div class="timeline-center">
+                                <div class="timeline-year">{card.year ?? "????"}</div>
+                              </div>
+                              <div class="timeline-title">{card.title || "Unknown"}</div>
+                            </div>
+                            <div class="card-face card-face-back">
+                              <div class="card-stats-face">
+                                <div class="card-stats-top">
+                                  <span class={`diff-badge diff-${cardStats?.difficulty?.level || "new"}`}>
+                                    {cardStats?.difficulty?.label || "Neu"}
+                                  </span>
+                                  <span class="stats-plays">{cardStats?.plays ?? 0}×</span>
                                 </div>
-                                <div class="card-stats-list">
-                                  {#if cardStats.avgYearError !== null}
-                                    <div class="stats-row">
-                                      <span>Ø Daneben:</span>
-                                      <strong>±{cardStats.avgYearError} J.</strong>
-                                    </div>
-                                    {#if cardStats.tendency}
-                                      <div class="stats-tendency">{getTendencyLabel(cardStats.tendency)}</div>
+                                {#if isStatsLoading && !cardStats}
+                                  <div class="card-stats-empty">Lade Statistik...</div>
+                                {:else if !cardStats || cardStats.plays === 0}
+                                  <div class="card-stats-empty">Startkarte · Noch keine Daten</div>
+                                {:else}
+                                  <div class="card-stats-hero">
+                                    <span class="stats-rate-value">{cardStats.correctRate ?? 0}%</span>
+                                    <span class="stats-rate-label">Jahr richtig</span>
+                                  </div>
+                                  <div class="card-stats-list">
+                                    {#if cardStats.avgYearError !== null}
+                                      <div class="stats-row">
+                                        <span>Ø Daneben</span>
+                                        <strong>±{cardStats.avgYearError} J.</strong>
+                                      </div>
+                                      {#if cardStats.tendency}
+                                        <div class="stats-tendency">{getTendencyLabel(cardStats.tendency)}</div>
+                                      {/if}
                                     {/if}
-                                  {/if}
-                                  {#if cardStats.artistRate !== null}
-                                    <div class="stats-row">
-                                      <span>🎤 Interpret:</span>
-                                      <strong>{cardStats.artistRate}%</strong>
-                                    </div>
-                                  {/if}
-                                  {#if cardStats.titleRate !== null}
-                                    <div class="stats-row">
-                                      <span>🎵 Titel:</span>
-                                      <strong>{cardStats.titleRate}%</strong>
-                                    </div>
-                                  {/if}
-                                  {#if cardStats.avgDecisionSec !== null}
-                                    <div class="stats-row">
-                                      <span>⏱ Ø Zeit:</span>
-                                      <strong>{cardStats.avgDecisionSec}s</strong>
-                                    </div>
-                                  {/if}
-                                </div>
-                              {/if}
+                                    {#if cardStats.artistRate !== null}
+                                      <div class="stats-row">
+                                        <span>Interpret</span>
+                                        <strong>{cardStats.artistRate}%</strong>
+                                      </div>
+                                    {/if}
+                                    {#if cardStats.titleRate !== null}
+                                      <div class="stats-row">
+                                        <span>Songtitel</span>
+                                        <strong>{cardStats.titleRate}%</strong>
+                                      </div>
+                                    {/if}
+                                    {#if cardStats.avgDecisionSec !== null}
+                                      <div class="stats-row">
+                                        <span>Ø Bedenkzeit</span>
+                                        <strong>{cardStats.avgDecisionSec}s</strong>
+                                      </div>
+                                    {/if}
+                                  </div>
+                                {/if}
+                              </div>
                             </div>
-                          {:else}
-                            <span class="card-flip-icon" aria-hidden="true">📊</span>
-                            <div class="timeline-top">
-                              <span class="timeline-artist">{card.artist || "Unknown"}</span>
-                            </div>
-                            <div class="timeline-center">
-                              <div class="timeline-year">{card.year ?? "????"}</div>
-                            </div>
-                            <div class="timeline-title">{card.title || "Unknown"}</div>
-                          {/if}
+                          </div>
                         </div>
                       </div>
                     {/key}
@@ -2066,38 +2143,121 @@
   .flippable-card {
     cursor: pointer;
     user-select: none;
-    transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
+    padding: 0 !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    perspective: 900px;
+    transition: transform 0.22s ease;
   }
 
   .flippable-card:hover {
     transform: translateY(-2px);
   }
 
-  .flippable-card.stats-flipped {
-    background: radial-gradient(circle at top, rgba(28, 30, 46, 0.98), rgba(12, 13, 22, 0.99)) !important;
-    border: 1.5px solid rgba(61, 240, 255, 0.45) !important;
-    color: #f4f7ff !important;
-    box-shadow: 0 0 16px rgba(61, 240, 255, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
-    padding: 8px 9px !important;
-    display: flex !important;
-    flex-direction: column !important;
-    justify-content: space-between !important;
-    animation: cardFlip 0.45s ease;
+  .flippable-card:focus-visible {
+    outline: none;
   }
 
-  .card-flip-icon {
+  .card-flipper {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 160px;
+    display: grid;
+    transform-style: preserve-3d;
+    transition: transform 0.52s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .flippable-card.stats-flipped .card-flipper {
+    transform: rotateY(180deg);
+  }
+
+  .card-face {
+    grid-area: 1 / 1;
+    width: 100%;
+    height: 100%;
+    min-height: 160px;
+    border-radius: 16px;
+    padding: 10px 12px;
+    background: linear-gradient(
+      180deg,
+      hsl(var(--card-hue, 270deg) 55% 72%),
+      hsl(var(--card-hue, 270deg) 48% 62%)
+    );
+    border: 2px solid rgba(0, 0, 0, 0.08);
+    box-shadow:
+      inset 0 0 0 2px rgba(255, 255, 255, 0.22),
+      0 4px 12px rgba(0, 0, 0, 0.18);
+    color: #261019;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    overflow: hidden;
+    position: relative;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  }
+
+  .flippable-card:hover .card-face {
+    border-color: rgba(255, 255, 255, 0.38);
+    box-shadow:
+      inset 0 0 0 2px rgba(255, 255, 255, 0.45),
+      0 7px 16px rgba(0, 0, 0, 0.28);
+  }
+
+  .flippable-card.reveal .card-face {
+    box-shadow:
+      inset 0 0 0 2px rgba(255, 110, 200, 0.45),
+      0 4px 14px rgba(255, 110, 200, 0.22);
+  }
+
+  .card-face-front {
+    display: grid;
+    gap: 8px;
+    text-align: center;
+    transform: rotateY(0deg);
+  }
+
+  .card-face-front .timeline-top {
+    padding: 0 20px;
+  }
+
+  .card-face-back {
+    transform: rotateY(180deg);
+    padding: 9px 10px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  .card-flip-badge {
     position: absolute;
-    top: 5px;
+    top: 6px;
     right: 6px;
-    font-size: 10px;
-    opacity: 0.42;
-    transition: opacity 0.15s ease, transform 0.15s ease;
+    width: 19px;
+    height: 19px;
+    border-radius: 6px;
+    background: rgba(26, 15, 30, 0.08);
+    border: 1px solid rgba(26, 15, 30, 0.12);
+    color: rgba(38, 16, 25, 0.55);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease, border-color 0.16s ease;
     pointer-events: none;
   }
 
-  .flippable-card:hover .card-flip-icon {
-    opacity: 0.9;
-    transform: scale(1.12);
+  .card-flip-badge svg {
+    width: 10px;
+    height: 10px;
+    fill: currentColor;
+  }
+
+  .flippable-card:hover .card-flip-badge {
+    background: rgba(26, 15, 30, 0.16);
+    border-color: rgba(26, 15, 30, 0.24);
+    color: rgba(26, 15, 30, 0.88);
+    transform: scale(1.06);
   }
 
   .card-stats-face {
@@ -2109,6 +2269,7 @@
     height: 100%;
     text-align: left;
     font-size: 10.5px;
+    color: #261019;
   }
 
   .card-stats-top {
@@ -2121,73 +2282,78 @@
   .diff-badge {
     padding: 1.5px 6px;
     border-radius: 999px;
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
+    font-size: 8.5px;
+    font-weight: 800;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
-  }
-
-  .diff-new {
-    background: rgba(255, 255, 255, 0.12);
-    color: rgba(255, 255, 255, 0.78);
+    background: rgba(26, 15, 30, 0.12);
+    border: 1px solid rgba(26, 15, 30, 0.16);
+    color: #261019;
   }
 
   .diff-easy {
-    background: rgba(88, 255, 138, 0.2);
-    border: 1px solid rgba(88, 255, 138, 0.55);
-    color: #a8ffc4;
+    background: rgba(16, 98, 48, 0.16);
+    border-color: rgba(16, 98, 48, 0.32);
+    color: #0d3b1e;
   }
 
   .diff-medium {
-    background: rgba(61, 240, 255, 0.18);
-    border: 1px solid rgba(61, 240, 255, 0.5);
-    color: #b8f9ff;
+    background: rgba(26, 15, 30, 0.14);
+    border-color: rgba(26, 15, 30, 0.24);
+    color: #1f1022;
   }
 
   .diff-hard {
-    background: rgba(255, 179, 71, 0.22);
-    border: 1px solid rgba(255, 179, 71, 0.6);
-    color: #ffe0ad;
+    background: rgba(140, 52, 10, 0.18);
+    border-color: rgba(140, 52, 10, 0.34);
+    color: #4a1904;
   }
 
   .diff-legendary {
-    background: rgba(255, 77, 203, 0.25);
-    border: 1px solid rgba(255, 110, 220, 0.75);
-    color: #ffd1f3;
+    background: rgba(120, 14, 78, 0.2);
+    border-color: rgba(120, 14, 78, 0.38);
+    color: #42062b;
   }
 
   .stats-plays {
     font-size: 9.5px;
-    color: rgba(220, 230, 255, 0.7);
+    font-weight: 700;
+    color: rgba(38, 16, 25, 0.68);
     font-variant-numeric: tabular-nums;
   }
 
   .card-stats-hero {
     display: flex;
-    align-items: baseline;
+    flex-direction: column;
+    align-items: center;
     justify-content: center;
-    gap: 4px;
     padding: 2px 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .stats-rate-value {
-    font-size: 19px;
+    font-size: 22px;
     font-weight: 800;
-    color: #3df0ff;
-    line-height: 1.1;
+    color: #1a0f1e;
+    line-height: 1.05;
+    letter-spacing: 0.01em;
     font-variant-numeric: tabular-nums;
   }
 
   .stats-rate-label {
-    font-size: 9.5px;
-    color: rgba(230, 236, 255, 0.75);
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(38, 16, 25, 0.65);
   }
 
   .card-stats-list {
     display: grid;
     gap: 2px;
+    background: rgba(255, 255, 255, 0.26);
+    border: 1px solid rgba(255, 255, 255, 0.34);
+    border-radius: 9px;
+    padding: 4px 6px;
   }
 
   .stats-row {
@@ -2195,28 +2361,49 @@
     align-items: center;
     justify-content: space-between;
     gap: 4px;
-    font-size: 10px;
-    color: rgba(230, 236, 255, 0.85);
+    font-size: 9.5px;
+    color: rgba(38, 16, 25, 0.82);
   }
 
   .stats-row strong {
-    color: #fff;
+    color: #1a0f1e;
+    font-weight: 800;
     font-variant-numeric: tabular-nums;
   }
 
   .stats-tendency {
-    font-size: 9px;
-    color: #ffb8e6;
+    font-size: 8.5px;
+    font-weight: 700;
+    color: rgba(38, 16, 25, 0.72);
     text-align: center;
     line-height: 1.15;
+    padding-top: 1px;
   }
 
   .card-stats-empty {
     margin: auto 0;
     text-align: center;
     font-size: 10px;
-    color: rgba(220, 228, 255, 0.62);
+    font-weight: 600;
+    color: rgba(38, 16, 25, 0.68);
     padding: 8px 4px;
+  }
+
+  @media (max-height: 560px) and (orientation: landscape) {
+    .card-flipper,
+    .card-face {
+      min-height: 118px;
+      border-radius: 12px;
+    }
+
+    .card-face-front,
+    .card-face-back {
+      padding: 6px 8px;
+    }
+
+    .stats-rate-value {
+      font-size: 17px;
+    }
   }
 
   @media (max-width: 640px) {

@@ -1587,7 +1587,7 @@
     overflow-x: auto;
     overflow-y: visible;
     -webkit-overflow-scrolling: touch;
-    padding-bottom: 6px;
+    padding: 10px 4px 12px;
     width: 100%;
   }
 
