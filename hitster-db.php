@@ -124,6 +124,29 @@ try {
                 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
             ");
 
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS song_stats (
+                  song_key VARCHAR(255) PRIMARY KEY,
+                  artist VARCHAR(255) DEFAULT '',
+                  title VARCHAR(255) DEFAULT '',
+                  release_year INT DEFAULT 0,
+                  times_played INT NOT NULL DEFAULT 0,
+                  times_correct INT NOT NULL DEFAULT 0,
+                  year_error_sum INT NOT NULL DEFAULT 0,
+                  year_error_count INT NOT NULL DEFAULT 0,
+                  too_old_count INT NOT NULL DEFAULT 0,
+                  too_new_count INT NOT NULL DEFAULT 0,
+                  artist_attempts INT NOT NULL DEFAULT 0,
+                  artist_correct INT NOT NULL DEFAULT 0,
+                  title_attempts INT NOT NULL DEFAULT 0,
+                  title_correct INT NOT NULL DEFAULT 0,
+                  decision_ms_sum BIGINT NOT NULL DEFAULT 0,
+                  decision_count INT NOT NULL DEFAULT 0,
+                  timeouts INT NOT NULL DEFAULT 0,
+                  last_played_at TIMESTAMP NULL DEFAULT NULL
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            ");
+
             $stmt = $pdo->query("SELECT id FROM playlists");
             $existingIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
@@ -301,6 +324,111 @@ try {
             }
             $stmt = $pdo->prepare("DELETE FROM songs WHERE id = ? AND pack_id = ?");
             $stmt->execute([$songId, $packId]);
+            echo json_encode(['success' => true]);
+            break;
+
+        case 'get_stats':
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS song_stats (
+                    song_key VARCHAR(255) PRIMARY KEY,
+                    artist VARCHAR(255) DEFAULT '',
+                    title VARCHAR(255) DEFAULT '',
+                    release_year INT DEFAULT 0,
+                    times_played INT NOT NULL DEFAULT 0,
+                    times_correct INT NOT NULL DEFAULT 0,
+                    year_error_sum INT NOT NULL DEFAULT 0,
+                    year_error_count INT NOT NULL DEFAULT 0,
+                    too_old_count INT NOT NULL DEFAULT 0,
+                    too_new_count INT NOT NULL DEFAULT 0,
+                    artist_attempts INT NOT NULL DEFAULT 0,
+                    artist_correct INT NOT NULL DEFAULT 0,
+                    title_attempts INT NOT NULL DEFAULT 0,
+                    title_correct INT NOT NULL DEFAULT 0,
+                    decision_ms_sum BIGINT NOT NULL DEFAULT 0,
+                    decision_count INT NOT NULL DEFAULT 0,
+                    timeouts INT NOT NULL DEFAULT 0,
+                    last_played_at TIMESTAMP NULL DEFAULT NULL
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            ");
+            $stmt = $pdo->query("SELECT * FROM song_stats");
+            echo json_encode(['success' => true, 'stats' => $stmt->fetchAll()]);
+            break;
+
+        case 'record_play':
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS song_stats (
+                    song_key VARCHAR(255) PRIMARY KEY,
+                    artist VARCHAR(255) DEFAULT '',
+                    title VARCHAR(255) DEFAULT '',
+                    release_year INT DEFAULT 0,
+                    times_played INT NOT NULL DEFAULT 0,
+                    times_correct INT NOT NULL DEFAULT 0,
+                    year_error_sum INT NOT NULL DEFAULT 0,
+                    year_error_count INT NOT NULL DEFAULT 0,
+                    too_old_count INT NOT NULL DEFAULT 0,
+                    too_new_count INT NOT NULL DEFAULT 0,
+                    artist_attempts INT NOT NULL DEFAULT 0,
+                    artist_correct INT NOT NULL DEFAULT 0,
+                    title_attempts INT NOT NULL DEFAULT 0,
+                    title_correct INT NOT NULL DEFAULT 0,
+                    decision_ms_sum BIGINT NOT NULL DEFAULT 0,
+                    decision_count INT NOT NULL DEFAULT 0,
+                    timeouts INT NOT NULL DEFAULT 0,
+                    last_played_at TIMESTAMP NULL DEFAULT NULL
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            ");
+            $key = substr(strval($body['key'] ?? ''), 0, 255);
+            if ($key === '') {
+                throw new Exception('key fehlt');
+            }
+            $d = isset($body['delta']) && is_array($body['delta']) ? $body['delta'] : [];
+            $num = function ($name) use ($d) {
+                return max(0, intval($d[$name] ?? 0));
+            };
+            $stmt = $pdo->prepare("
+                INSERT INTO song_stats (
+                    song_key, artist, title, release_year, times_played, times_correct, year_error_sum, year_error_count,
+                    too_old_count, too_new_count, artist_attempts, artist_correct, title_attempts, title_correct,
+                    decision_ms_sum, decision_count, timeouts, last_played_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                ON DUPLICATE KEY UPDATE
+                    artist = VALUES(artist),
+                    title = VALUES(title),
+                    release_year = VALUES(release_year),
+                    times_played = times_played + VALUES(times_played),
+                    times_correct = times_correct + VALUES(times_correct),
+                    year_error_sum = year_error_sum + VALUES(year_error_sum),
+                    year_error_count = year_error_count + VALUES(year_error_count),
+                    too_old_count = too_old_count + VALUES(too_old_count),
+                    too_new_count = too_new_count + VALUES(too_new_count),
+                    artist_attempts = artist_attempts + VALUES(artist_attempts),
+                    artist_correct = artist_correct + VALUES(artist_correct),
+                    title_attempts = title_attempts + VALUES(title_attempts),
+                    title_correct = title_correct + VALUES(title_correct),
+                    decision_ms_sum = decision_ms_sum + VALUES(decision_ms_sum),
+                    decision_count = decision_count + VALUES(decision_count),
+                    timeouts = timeouts + VALUES(timeouts),
+                    last_played_at = NOW()
+            ");
+            $stmt->execute([
+                $key,
+                substr(strval($body['artist'] ?? ''), 0, 255),
+                substr(strval($body['title'] ?? ''), 0, 255),
+                intval($body['year'] ?? 0),
+                $num('played'),
+                $num('correct'),
+                $num('yearErrorSum'),
+                $num('yearErrorCount'),
+                $num('tooOld'),
+                $num('tooNew'),
+                $num('artistAttempts'),
+                $num('artistCorrect'),
+                $num('titleAttempts'),
+                $num('titleCorrect'),
+                $num('decisionMsSum'),
+                $num('decisionCount'),
+                $num('timeouts')
+            ]);
             echo json_encode(['success' => true]);
             break;
 

@@ -820,6 +820,7 @@
     />
   {:else if gameState === "playing" || gameState === "finished"}
     <GameView
+      {apiBaseUrl}
       {players}
       {teams}
       {rules}

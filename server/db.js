@@ -5,6 +5,7 @@ const { parse } = require("csv-parse/sync");
 
 const REPO_ROOT = path.join(__dirname, "..");
 const PACK_LIST_PATH = path.join(REPO_ROOT, "data", "playlists", "hitster_de_packs.json");
+const STATS_LOCAL_PATH = path.join(REPO_ROOT, "data", "song-stats.json");
 
 const packIndex = new Map();
 const songsByPack = new Map();
@@ -262,6 +263,7 @@ async function initDatabase() {
   initInProgress = (async () => {
     try {
       await runInitDatabase();
+      await loadSongStats();
     } finally {
       initInProgress = null;
     }
@@ -368,6 +370,29 @@ async function runInitDatabase() {
         is_broken TINYINT(1) DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_pack_id (pack_id)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS song_stats (
+        song_key VARCHAR(255) PRIMARY KEY,
+        artist VARCHAR(255) DEFAULT '',
+        title VARCHAR(255) DEFAULT '',
+        release_year INT DEFAULT 0,
+        times_played INT NOT NULL DEFAULT 0,
+        times_correct INT NOT NULL DEFAULT 0,
+        year_error_sum INT NOT NULL DEFAULT 0,
+        year_error_count INT NOT NULL DEFAULT 0,
+        too_old_count INT NOT NULL DEFAULT 0,
+        too_new_count INT NOT NULL DEFAULT 0,
+        artist_attempts INT NOT NULL DEFAULT 0,
+        artist_correct INT NOT NULL DEFAULT 0,
+        title_attempts INT NOT NULL DEFAULT 0,
+        title_correct INT NOT NULL DEFAULT 0,
+        decision_ms_sum BIGINT NOT NULL DEFAULT 0,
+        decision_count INT NOT NULL DEFAULT 0,
+        timeouts INT NOT NULL DEFAULT 0,
+        last_played_at TIMESTAMP NULL DEFAULT NULL
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
     `);
 
@@ -504,7 +529,7 @@ function loadDeckFromPacks(packIds) {
   for (const packId of packIds) {
     const songs = songsByPack.get(packId) || [];
     for (const song of songs) {
-      cards.push({ ...song });
+      cards.push({ ...song, statsKey: getSongStatsKey(song) });
     }
   }
   return cards;
@@ -751,6 +776,302 @@ async function markSongBroken(card) {
   }
 }
 
+// =============================================================================
+// SONG STATISTICS
+// =============================================================================
+const statsByKey = new Map();
+let statsPersistWarned = false;
+
+function normalizeStatsPart(value) {
+  const raw = String(value || "");
+  const cleaned = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .toLowerCase()
+    .replace(/\([^)]*\)|\[[^\]]*\]/gu, " ")
+    .replace(/\b(?:feat|ft|featuring)\b\.?.*$/gu, " ")
+    .replace(/&/gu, " and ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+  return cleaned || raw.trim().toLowerCase();
+}
+
+/**
+ * Stable key used to aggregate statistics for a song across playlists,
+ * independent of database ids or YouTube links (which may be replaced).
+ */
+function getSongStatsKey(card) {
+  if (!card) {
+    return "";
+  }
+  const artist = normalizeStatsPart(card.artist);
+  const title = normalizeStatsPart(card.title);
+  if (!artist && !title) {
+    return "";
+  }
+  return `${artist}|${title}`.slice(0, 255);
+}
+
+function createEmptyStats(key, card = {}) {
+  return {
+    key,
+    artist: String(card.artist || ""),
+    title: String(card.title || ""),
+    year: Number.parseInt(card.year, 10) || 0,
+    timesPlayed: 0,
+    timesCorrect: 0,
+    yearErrorSum: 0,
+    yearErrorCount: 0,
+    tooOldCount: 0,
+    tooNewCount: 0,
+    artistAttempts: 0,
+    artistCorrect: 0,
+    titleAttempts: 0,
+    titleCorrect: 0,
+    decisionMsSum: 0,
+    decisionCount: 0,
+    timeouts: 0,
+    lastPlayedAt: null,
+  };
+}
+
+function statsRowToObject(row) {
+  const toInt = (value) => Number.parseInt(value, 10) || 0;
+  return {
+    key: String(row.song_key || ""),
+    artist: String(row.artist || ""),
+    title: String(row.title || ""),
+    year: toInt(row.release_year),
+    timesPlayed: toInt(row.times_played),
+    timesCorrect: toInt(row.times_correct),
+    yearErrorSum: toInt(row.year_error_sum),
+    yearErrorCount: toInt(row.year_error_count),
+    tooOldCount: toInt(row.too_old_count),
+    tooNewCount: toInt(row.too_new_count),
+    artistAttempts: toInt(row.artist_attempts),
+    artistCorrect: toInt(row.artist_correct),
+    titleAttempts: toInt(row.title_attempts),
+    titleCorrect: toInt(row.title_correct),
+    decisionMsSum: toInt(row.decision_ms_sum),
+    decisionCount: toInt(row.decision_count),
+    timeouts: toInt(row.timeouts),
+    lastPlayedAt: row.last_played_at || null,
+  };
+}
+
+function saveStatsToDisk() {
+  try {
+    const payload = Array.from(statsByKey.values());
+    fs.writeFileSync(STATS_LOCAL_PATH, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+  } catch (err) {
+    console.warn("[Stats] Could not write local song stats:", err.message);
+  }
+}
+
+async function loadSongStats() {
+  statsByKey.clear();
+  try {
+    if (bridgeMode) {
+      const data = await callBridge("get_stats");
+      for (const row of data.stats || []) {
+        const stats = statsRowToObject(row);
+        if (stats.key) {
+          statsByKey.set(stats.key, stats);
+        }
+      }
+    } else if (dbEnabled && pool) {
+      const [rows] = await pool.query("SELECT * FROM song_stats");
+      for (const row of rows) {
+        const stats = statsRowToObject(row);
+        if (stats.key) {
+          statsByKey.set(stats.key, stats);
+        }
+      }
+    } else if (fs.existsSync(STATS_LOCAL_PATH)) {
+      const entries = JSON.parse(fs.readFileSync(STATS_LOCAL_PATH, "utf-8"));
+      for (const entry of Array.isArray(entries) ? entries : []) {
+        if (entry?.key) {
+          statsByKey.set(entry.key, { ...createEmptyStats(entry.key), ...entry });
+        }
+      }
+    }
+    console.log(`[Stats] Loaded statistics for ${statsByKey.size} songs.`);
+  } catch (err) {
+    console.warn("[Stats] Could not load song statistics:", err.message);
+  }
+}
+
+async function persistSongPlay(stats, delta) {
+  const record = {
+    key: stats.key,
+    artist: stats.artist.slice(0, 255),
+    title: stats.title.slice(0, 255),
+    year: stats.year,
+    delta,
+  };
+  if (bridgeMode) {
+    await callBridge("record_play", record);
+    return;
+  }
+  if (dbEnabled && pool) {
+    await pool.query(
+      `INSERT INTO song_stats (
+        song_key, artist, title, release_year, times_played, times_correct, year_error_sum, year_error_count,
+        too_old_count, too_new_count, artist_attempts, artist_correct, title_attempts, title_correct,
+        decision_ms_sum, decision_count, timeouts, last_played_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        artist = VALUES(artist),
+        title = VALUES(title),
+        release_year = VALUES(release_year),
+        times_played = times_played + VALUES(times_played),
+        times_correct = times_correct + VALUES(times_correct),
+        year_error_sum = year_error_sum + VALUES(year_error_sum),
+        year_error_count = year_error_count + VALUES(year_error_count),
+        too_old_count = too_old_count + VALUES(too_old_count),
+        too_new_count = too_new_count + VALUES(too_new_count),
+        artist_attempts = artist_attempts + VALUES(artist_attempts),
+        artist_correct = artist_correct + VALUES(artist_correct),
+        title_attempts = title_attempts + VALUES(title_attempts),
+        title_correct = title_correct + VALUES(title_correct),
+        decision_ms_sum = decision_ms_sum + VALUES(decision_ms_sum),
+        decision_count = decision_count + VALUES(decision_count),
+        timeouts = timeouts + VALUES(timeouts),
+        last_played_at = NOW()`,
+      [
+        record.key,
+        record.artist,
+        record.title,
+        record.year,
+        delta.played,
+        delta.correct,
+        delta.yearErrorSum,
+        delta.yearErrorCount,
+        delta.tooOld,
+        delta.tooNew,
+        delta.artistAttempts,
+        delta.artistCorrect,
+        delta.titleAttempts,
+        delta.titleCorrect,
+        delta.decisionMsSum,
+        delta.decisionCount,
+        delta.timeouts,
+      ]
+    );
+    return;
+  }
+  saveStatsToDisk();
+}
+
+/**
+ * Records the outcome of one real placement decision for a song.
+ * result = { correct, timedOut, yearError, direction ("too_old" | "too_new" | null),
+ *            artistAttempt, artistCorrect, titleAttempt, titleCorrect, decisionMs }
+ */
+function recordSongPlay(card, result = {}) {
+  const key = card?.statsKey || getSongStatsKey(card);
+  if (!key) {
+    return;
+  }
+  const hasYearError = Number.isFinite(result.yearError) && result.yearError > 0;
+  const hasDecision = Number.isFinite(result.decisionMs) && result.decisionMs > 0;
+  const delta = {
+    played: 1,
+    correct: result.correct ? 1 : 0,
+    yearErrorSum: hasYearError ? Math.round(result.yearError) : 0,
+    yearErrorCount: hasYearError ? 1 : 0,
+    tooOld: hasYearError && result.direction === "too_old" ? 1 : 0,
+    tooNew: hasYearError && result.direction === "too_new" ? 1 : 0,
+    artistAttempts: result.artistAttempt ? 1 : 0,
+    artistCorrect: result.artistAttempt && result.artistCorrect ? 1 : 0,
+    titleAttempts: result.titleAttempt ? 1 : 0,
+    titleCorrect: result.titleAttempt && result.titleCorrect ? 1 : 0,
+    decisionMsSum: hasDecision ? Math.round(result.decisionMs) : 0,
+    decisionCount: hasDecision ? 1 : 0,
+    timeouts: result.timedOut ? 1 : 0,
+  };
+
+  const stats = statsByKey.get(key) || createEmptyStats(key, card);
+  stats.artist = String(card.artist || stats.artist || "");
+  stats.title = String(card.title || stats.title || "");
+  stats.year = Number.parseInt(card.year, 10) || stats.year || 0;
+  stats.timesPlayed += delta.played;
+  stats.timesCorrect += delta.correct;
+  stats.yearErrorSum += delta.yearErrorSum;
+  stats.yearErrorCount += delta.yearErrorCount;
+  stats.tooOldCount += delta.tooOld;
+  stats.tooNewCount += delta.tooNew;
+  stats.artistAttempts += delta.artistAttempts;
+  stats.artistCorrect += delta.artistCorrect;
+  stats.titleAttempts += delta.titleAttempts;
+  stats.titleCorrect += delta.titleCorrect;
+  stats.decisionMsSum += delta.decisionMsSum;
+  stats.decisionCount += delta.decisionCount;
+  stats.timeouts += delta.timeouts;
+  stats.lastPlayedAt = new Date().toISOString();
+  statsByKey.set(key, stats);
+
+  persistSongPlay(stats, delta).catch((err) => {
+    if (!statsPersistWarned) {
+      statsPersistWarned = true;
+      console.warn(
+        "[Stats] Could not persist song statistics (is the latest hitster-db.php uploaded?):",
+        err.message
+      );
+    }
+  });
+}
+
+function getDifficulty(plays, correctRate) {
+  if (plays < 3 || correctRate === null) {
+    return { level: "new", label: "Neu" };
+  }
+  if (correctRate >= 70) {
+    return { level: "easy", label: "Leicht" };
+  }
+  if (correctRate >= 45) {
+    return { level: "medium", label: "Mittel" };
+  }
+  if (correctRate >= 20) {
+    return { level: "hard", label: "Schwer" };
+  }
+  return { level: "legendary", label: "Legendär" };
+}
+
+/** Returns derived, client-ready statistics for a song key (or null). */
+function getSongStats(key) {
+  const stats = statsByKey.get(String(key || ""));
+  if (!stats) {
+    return null;
+  }
+  const percent = (part, total) => (total > 0 ? Math.round((part / total) * 100) : null);
+  const plays = stats.timesPlayed;
+  const correctRate = percent(stats.timesCorrect, plays);
+  let tendency = null;
+  if (stats.tooOldCount > stats.tooNewCount) {
+    tendency = "too_old";
+  } else if (stats.tooNewCount > stats.tooOldCount) {
+    tendency = "too_new";
+  } else if (stats.tooOldCount > 0) {
+    tendency = "balanced";
+  }
+  return {
+    key: stats.key,
+    plays,
+    correct: stats.timesCorrect,
+    correctRate,
+    avgYearError:
+      stats.yearErrorCount > 0 ? Math.round((stats.yearErrorSum / stats.yearErrorCount) * 10) / 10 : null,
+    tendency,
+    artistRate: percent(stats.artistCorrect, stats.artistAttempts),
+    titleRate: percent(stats.titleCorrect, stats.titleAttempts),
+    avgDecisionSec: stats.decisionCount > 0 ? Math.round(stats.decisionMsSum / stats.decisionCount / 1000) : null,
+    timeouts: stats.timeouts,
+    lastPlayedAt: stats.lastPlayedAt,
+    difficulty: getDifficulty(plays, correctRate),
+  };
+}
+
 function isDatabaseConnected() {
   return dbEnabled;
 }
@@ -775,4 +1096,7 @@ module.exports = {
   parseCsvSongs,
   isDatabaseConnected,
   getLastError,
+  getSongStatsKey,
+  recordSongPlay,
+  getSongStats,
 };

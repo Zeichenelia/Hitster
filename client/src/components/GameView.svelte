@@ -1,5 +1,6 @@
 <script>
   import { onMount } from "svelte";
+  export let apiBaseUrl = "";
   export let players = [];
   export let teams = [];
   export let rules = null;
@@ -87,6 +88,44 @@
   let draftTitle = "";
   let editingBonusField = "";
   let lastGuessCardId = "";
+  let flippedCards = {};
+  let cardStatsById = {};
+  let cardStatsLoading = {};
+
+  const getTendencyLabel = (tendency) => {
+    if (tendency === "too_old") return "↘ meist älter geschätzt";
+    if (tendency === "too_new") return "↗ meist jünger geschätzt";
+    if (tendency === "balanced") return "↔ ausgeglichen";
+    return "";
+  };
+
+  async function toggleCardFlip(card, slotUniqueKey) {
+    if (!card) return;
+    const flipKey = slotUniqueKey || card.id || `${card.artist}-${card.title}`;
+    const nextFlipped = !flippedCards[flipKey];
+    flippedCards = { ...flippedCards, [flipKey]: nextFlipped };
+    if (!nextFlipped) {
+      return;
+    }
+    const cacheKey = card.id || flipKey;
+    cardStatsLoading = { ...cardStatsLoading, [cacheKey]: true };
+    try {
+      const params = new URLSearchParams({
+        key: card.statsKey || "",
+        artist: card.artist || "",
+        title: card.title || "",
+      });
+      const res = await fetch(`${apiBaseUrl}/api/song-stats?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        cardStatsById = { ...cardStatsById, [cacheKey]: data.stats || null };
+      }
+    } catch (_err) {
+      // Ignore network errors
+    } finally {
+      cardStatsLoading = { ...cardStatsLoading, [cacheKey]: false };
+    }
+  }
 
   const updateRemainingTimer = () => {
     if (!turnDeadline || !currentCard || !rules?.timerEnabled) {
@@ -1193,34 +1232,171 @@
                       </div>
                     </div>
                   {:else if !lastRevealCorrect && lastRevealedCard && team.id === lastRevealTeamId && position === lastRevealPosition}
+                    {@const revealFlipKey = `reveal-${team.id}-${lastRevealedCard.id || position}`}
+                    {@const isRevealFlipped = Boolean(flippedCards[revealFlipKey])}
+                    {@const revealStats = cardStatsById[lastRevealedCard.id || revealFlipKey]}
+                    {@const revealLoading = Boolean(cardStatsLoading[lastRevealedCard.id || revealFlipKey])}
                     <div class="timeline-slot card-slot">
-                      <div class="timeline-card reveal" style="--card-hue: 210deg">
-                        <div class="timeline-top">
-                          <span class="timeline-artist">{lastRevealedCard.artist || "Unknown"}</span>
-                        </div>
-                        <div class="timeline-center">
-                          <div class="timeline-year">{lastRevealedCard.year ?? "????"}</div>
-                        </div>
-                        <div class="timeline-title">{lastRevealedCard.title || "Unknown"}</div>
+                      <div
+                        class="timeline-card reveal flippable-card"
+                        class:stats-flipped={isRevealFlipped}
+                        style="--card-hue: 210deg"
+                        role="button"
+                        tabindex="0"
+                        title="Klicken für Song-Statistiken"
+                        aria-label="Karte umdrehen für Song-Statistiken"
+                        on:click={() => toggleCardFlip(lastRevealedCard, revealFlipKey)}
+                        on:keydown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            toggleCardFlip(lastRevealedCard, revealFlipKey);
+                          }
+                        }}
+                      >
+                        {#if isRevealFlipped}
+                          <div class="card-stats-face">
+                            <div class="card-stats-top">
+                              <span class={`diff-badge diff-${revealStats?.difficulty?.level || "new"}`}>
+                                {revealStats?.difficulty?.label || "Neu"}
+                              </span>
+                              <span class="stats-plays">{revealStats?.plays ?? 0}× gespielt</span>
+                            </div>
+                            {#if revealLoading && !revealStats}
+                              <div class="card-stats-empty">Lade Statistik...</div>
+                            {:else if !revealStats || revealStats.plays === 0}
+                              <div class="card-stats-empty">Noch keine Runden-Statistik</div>
+                            {:else}
+                              <div class="card-stats-hero">
+                                <span class="stats-rate-value">{revealStats.correctRate ?? 0}%</span>
+                                <span class="stats-rate-label">Jahr richtig</span>
+                              </div>
+                              <div class="card-stats-list">
+                                {#if revealStats.avgYearError !== null}
+                                  <div class="stats-row">
+                                    <span>Ø Abweichung:</span>
+                                    <strong>±{revealStats.avgYearError} J.</strong>
+                                  </div>
+                                  {#if revealStats.tendency}
+                                    <div class="stats-tendency">{getTendencyLabel(revealStats.tendency)}</div>
+                                  {/if}
+                                {/if}
+                                {#if revealStats.artistRate !== null}
+                                  <div class="stats-row">
+                                    <span>🎤 Interpret:</span>
+                                    <strong>{revealStats.artistRate}%</strong>
+                                  </div>
+                                {/if}
+                                {#if revealStats.titleRate !== null}
+                                  <div class="stats-row">
+                                    <span>🎵 Titel:</span>
+                                    <strong>{revealStats.titleRate}%</strong>
+                                  </div>
+                                {/if}
+                                {#if revealStats.avgDecisionSec !== null}
+                                  <div class="stats-row">
+                                    <span>⏱ Ø Zeit:</span>
+                                    <strong>{revealStats.avgDecisionSec}s</strong>
+                                  </div>
+                                {/if}
+                              </div>
+                            {/if}
+                          </div>
+                        {:else}
+                          <span class="card-flip-icon" aria-hidden="true">📊</span>
+                          <div class="timeline-top">
+                            <span class="timeline-artist">{lastRevealedCard.artist || "Unknown"}</span>
+                          </div>
+                          <div class="timeline-center">
+                            <div class="timeline-year">{lastRevealedCard.year ?? "????"}</div>
+                          </div>
+                          <div class="timeline-title">{lastRevealedCard.title || "Unknown"}</div>
+                        {/if}
                       </div>
                     </div>
                   {/if}
                   {#if (team.timeline || [])[position]}
                     {@const card = team.timeline[position]}
+                    {@const cardFlipKey = `${team.id}-${card.id || position}`}
+                    {@const isCardFlipped = Boolean(flippedCards[cardFlipKey])}
+                    {@const cardStats = cardStatsById[card.id || cardFlipKey]}
+                    {@const isStatsLoading = Boolean(cardStatsLoading[card.id || cardFlipKey])}
                     {#key card.id}
                       <div class="timeline-slot card-slot">
                         <div
-                          class="timeline-card filled"
+                          class="timeline-card filled flippable-card"
                           class:placed={card.id === lastPlacedCardId && team.id === lastPlacedTeamId}
+                          class:stats-flipped={isCardFlipped}
                           style={`--card-hue: ${position * 36}deg`}
+                          role="button"
+                          tabindex="0"
+                          title="Klicken für Song-Statistiken"
+                          aria-label="Karte umdrehen für Song-Statistiken"
+                          on:click={() => toggleCardFlip(card, cardFlipKey)}
+                          on:keydown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              toggleCardFlip(card, cardFlipKey);
+                            }
+                          }}
                         >
-                          <div class="timeline-top">
-                            <span class="timeline-artist">{card.artist || "Unknown"}</span>
-                          </div>
-                          <div class="timeline-center">
-                            <div class="timeline-year">{card.year ?? "????"}</div>
-                          </div>
-                          <div class="timeline-title">{card.title || "Unknown"}</div>
+                          {#if isCardFlipped}
+                            <div class="card-stats-face">
+                              <div class="card-stats-top">
+                                <span class={`diff-badge diff-${cardStats?.difficulty?.level || "new"}`}>
+                                  {cardStats?.difficulty?.label || "Neu"}
+                                </span>
+                                <span class="stats-plays">{cardStats?.plays ?? 0}×</span>
+                              </div>
+                              {#if isStatsLoading && !cardStats}
+                                <div class="card-stats-empty">Lade Statistik...</div>
+                              {:else if !cardStats || cardStats.plays === 0}
+                                <div class="card-stats-empty">Startkarte / Noch keine Statistik</div>
+                              {:else}
+                                <div class="card-stats-hero">
+                                  <span class="stats-rate-value">{cardStats.correctRate ?? 0}%</span>
+                                  <span class="stats-rate-label">Jahr richtig</span>
+                                </div>
+                                <div class="card-stats-list">
+                                  {#if cardStats.avgYearError !== null}
+                                    <div class="stats-row">
+                                      <span>Ø Daneben:</span>
+                                      <strong>±{cardStats.avgYearError} J.</strong>
+                                    </div>
+                                    {#if cardStats.tendency}
+                                      <div class="stats-tendency">{getTendencyLabel(cardStats.tendency)}</div>
+                                    {/if}
+                                  {/if}
+                                  {#if cardStats.artistRate !== null}
+                                    <div class="stats-row">
+                                      <span>🎤 Interpret:</span>
+                                      <strong>{cardStats.artistRate}%</strong>
+                                    </div>
+                                  {/if}
+                                  {#if cardStats.titleRate !== null}
+                                    <div class="stats-row">
+                                      <span>🎵 Titel:</span>
+                                      <strong>{cardStats.titleRate}%</strong>
+                                    </div>
+                                  {/if}
+                                  {#if cardStats.avgDecisionSec !== null}
+                                    <div class="stats-row">
+                                      <span>⏱ Ø Zeit:</span>
+                                      <strong>{cardStats.avgDecisionSec}s</strong>
+                                    </div>
+                                  {/if}
+                                </div>
+                              {/if}
+                            </div>
+                          {:else}
+                            <span class="card-flip-icon" aria-hidden="true">📊</span>
+                            <div class="timeline-top">
+                              <span class="timeline-artist">{card.artist || "Unknown"}</span>
+                            </div>
+                            <div class="timeline-center">
+                              <div class="timeline-year">{card.year ?? "????"}</div>
+                            </div>
+                            <div class="timeline-title">{card.title || "Unknown"}</div>
+                          {/if}
                         </div>
                       </div>
                     {/key}
@@ -1885,6 +2061,162 @@
   .bonus-spectator-muted {
     color: rgba(255, 255, 255, 0.45);
     font-size: 11.5px;
+  }
+
+  .flippable-card {
+    cursor: pointer;
+    user-select: none;
+    transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
+  }
+
+  .flippable-card:hover {
+    transform: translateY(-2px);
+  }
+
+  .flippable-card.stats-flipped {
+    background: radial-gradient(circle at top, rgba(28, 30, 46, 0.98), rgba(12, 13, 22, 0.99)) !important;
+    border: 1.5px solid rgba(61, 240, 255, 0.45) !important;
+    color: #f4f7ff !important;
+    box-shadow: 0 0 16px rgba(61, 240, 255, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
+    padding: 8px 9px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    animation: cardFlip 0.45s ease;
+  }
+
+  .card-flip-icon {
+    position: absolute;
+    top: 5px;
+    right: 6px;
+    font-size: 10px;
+    opacity: 0.42;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    pointer-events: none;
+  }
+
+  .flippable-card:hover .card-flip-icon {
+    opacity: 0.9;
+    transform: scale(1.12);
+  }
+
+  .card-stats-face {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 4px;
+    width: 100%;
+    height: 100%;
+    text-align: left;
+    font-size: 10.5px;
+  }
+
+  .card-stats-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+  }
+
+  .diff-badge {
+    padding: 1.5px 6px;
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .diff-new {
+    background: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.78);
+  }
+
+  .diff-easy {
+    background: rgba(88, 255, 138, 0.2);
+    border: 1px solid rgba(88, 255, 138, 0.55);
+    color: #a8ffc4;
+  }
+
+  .diff-medium {
+    background: rgba(61, 240, 255, 0.18);
+    border: 1px solid rgba(61, 240, 255, 0.5);
+    color: #b8f9ff;
+  }
+
+  .diff-hard {
+    background: rgba(255, 179, 71, 0.22);
+    border: 1px solid rgba(255, 179, 71, 0.6);
+    color: #ffe0ad;
+  }
+
+  .diff-legendary {
+    background: rgba(255, 77, 203, 0.25);
+    border: 1px solid rgba(255, 110, 220, 0.75);
+    color: #ffd1f3;
+  }
+
+  .stats-plays {
+    font-size: 9.5px;
+    color: rgba(220, 230, 255, 0.7);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .card-stats-hero {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 4px;
+    padding: 2px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .stats-rate-value {
+    font-size: 19px;
+    font-weight: 800;
+    color: #3df0ff;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stats-rate-label {
+    font-size: 9.5px;
+    color: rgba(230, 236, 255, 0.75);
+  }
+
+  .card-stats-list {
+    display: grid;
+    gap: 2px;
+  }
+
+  .stats-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    font-size: 10px;
+    color: rgba(230, 236, 255, 0.85);
+  }
+
+  .stats-row strong {
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stats-tendency {
+    font-size: 9px;
+    color: #ffb8e6;
+    text-align: center;
+    line-height: 1.15;
+  }
+
+  .card-stats-empty {
+    margin: auto 0;
+    text-align: center;
+    font-size: 10px;
+    color: rgba(220, 228, 255, 0.62);
+    padding: 8px 4px;
   }
 
   @media (max-width: 640px) {

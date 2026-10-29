@@ -172,6 +172,20 @@ app.delete("/api/playlists/:packId/songs/:songId", requireAdminPin, async (req, 
   }
 });
 
+app.get("/api/song-stats", (req, res) => {
+  const rawKey = String(req.query.key || "").trim();
+  const fallbackKey = db.getSongStatsKey({
+    artist: req.query.artist || "",
+    title: req.query.title || "",
+  });
+  const key = rawKey || fallbackKey;
+  if (!key) {
+    res.status(400).json({ code: "MISSING_KEY", message: "Song-Key fehlt." });
+    return;
+  }
+  res.json({ key, stats: db.getSongStats(key) });
+});
+
 app.get("/api/youtube-meta", async (req, res) => {
   const rawUrl = String(req.query.url || "").trim();
   const videoId = getYouTubeId(rawUrl);
@@ -254,6 +268,7 @@ function serializeCardForClient(card) {
     title: card.title || "",
     artist: card.artist || "",
     year: card.year ?? "",
+    statsKey: card.statsKey || db.getSongStatsKey(card),
   };
 }
 
@@ -505,6 +520,39 @@ function executeCardReveal(room, roomCode, { forceMiss = false, timedOut = false
 
   const effectiveGuess = guessOverride || room.pendingGuess || { artist: "", title: "" };
   const bonusResult = evaluateBonusGuess(room.rules, room.currentCard, effectiveGuess);
+
+  // Song statistics: only real decisions count (the auto-placed first card is skipped).
+  if (timeline.length > 0) {
+    let yearError = null;
+    let direction = null;
+    if (!correct && hasPlacement && !forceMiss) {
+      const cardYear = normalizeYear(room.currentCard.year);
+      const prevYear = index > 0 ? normalizeYear(timeline[index - 1].year) : null;
+      const nextYear = index < timeline.length ? normalizeYear(timeline[index].year) : null;
+      if (nextYear !== null && cardYear > nextYear) {
+        // Placed before songs that are older -> song was estimated too old
+        yearError = cardYear - nextYear;
+        direction = "too_old";
+      } else if (prevYear !== null && cardYear < prevYear) {
+        // Placed after songs that are newer -> song was estimated too new
+        yearError = prevYear - cardYear;
+        direction = "too_new";
+      }
+    }
+    const mode = room.rules?.guessMode || "year";
+    const elapsedMs = room.turnStartedAt ? Date.now() - room.turnStartedAt : null;
+    db.recordSongPlay(room.currentCard, {
+      correct,
+      timedOut,
+      yearError,
+      direction,
+      artistAttempt: mode === "year+artist" || mode === "year+artist+title",
+      artistCorrect: Boolean(bonusResult.artistCorrect),
+      titleAttempt: mode === "year+artist+title",
+      titleCorrect: Boolean(bonusResult.titleCorrect),
+      decisionMs: !timedOut && elapsedMs !== null && elapsedMs <= 10 * 60 * 1000 ? elapsedMs : null,
+    });
+  }
 
   if (correct) {
     team.score += 1;
@@ -1322,6 +1370,7 @@ io.on("connection", (socket) => {
       return;
     }
     room.currentCard = nextCard;
+    room.turnStartedAt = Date.now();
     room.pendingGuess = { artist: "", title: "" };
     room.audioState = createAudioState(nextCard);
     room.audioSyncAuthorityId = null;
@@ -1367,6 +1416,7 @@ io.on("connection", (socket) => {
     }
 
     room.currentCard = nextCard;
+    room.turnStartedAt = Date.now();
     room.pendingGuess = { artist: "", title: "" };
     room.audioState = createAudioState(nextCard);
     room.audioSyncAuthorityId = null;
@@ -1429,6 +1479,7 @@ io.on("connection", (socket) => {
     const nextCard = drawValidCard(room);
     if (nextCard) {
       room.currentCard = nextCard;
+      room.turnStartedAt = Date.now();
       room.audioState = createAudioState(nextCard);
       room.audioSyncAuthorityId = null;
       room.audioSyncAuthorityUpdatedAt = 0;
