@@ -16,8 +16,11 @@ export default defineConfig(({ mode }) => {
     plugins: [svelte()],
     server: {
       host: "0.0.0.0",
-      allowedHosts,
+      allowedHosts: true,
       proxy: {
+        "/api": {
+          target: "http://localhost:3001",
+        },
         "/packs": {
           target: "http://localhost:3001",
         },
