@@ -336,6 +336,8 @@ function broadcastRoomState(roomCode, room) {
 }
 
 const roomTimers = new Map();
+const roomCleanupTimers = new Map();
+const EMPTY_ROOM_GRACE_MS = 15 * 60 * 1000; // 15 minutes
 
 function clearRoomTurnTimer(roomCode, room) {
   const existing = roomTimers.get(roomCode);
@@ -346,6 +348,53 @@ function clearRoomTurnTimer(roomCode, room) {
   if (room) {
     room.turnDeadline = null;
   }
+}
+
+function cancelRoomCleanup(roomCode) {
+  const timer = roomCleanupTimers.get(roomCode);
+  if (timer) {
+    clearTimeout(timer);
+    roomCleanupTimers.delete(roomCode);
+  }
+}
+
+function scheduleRoomCleanupIfEmpty(roomCode, room) {
+  if (!room) {
+    return;
+  }
+  const hasConnectedPlayer = Array.from(room.players.values()).some(
+    (p) => p && p.connected !== false
+  );
+  if (hasConnectedPlayer) {
+    cancelRoomCleanup(roomCode);
+    return;
+  }
+  if (room.players.size === 0) {
+    cancelRoomCleanup(roomCode);
+    clearRoomTurnTimer(roomCode, room);
+    rooms.delete(roomCode);
+    return;
+  }
+  clearRoomTurnTimer(roomCode, room);
+  if (roomCleanupTimers.has(roomCode)) {
+    return;
+  }
+  const timer = setTimeout(() => {
+    roomCleanupTimers.delete(roomCode);
+    const currentRoom = rooms.get(roomCode);
+    if (!currentRoom) {
+      return;
+    }
+    const stillConnected = Array.from(currentRoom.players.values()).some(
+      (p) => p && p.connected !== false
+    );
+    if (!stillConnected) {
+      clearRoomTurnTimer(roomCode, currentRoom);
+      rooms.delete(roomCode);
+      console.log(`[Room] Cleaned up abandoned room ${roomCode} after 15m of inactivity.`);
+    }
+  }, EMPTY_ROOM_GRACE_MS);
+  roomCleanupTimers.set(roomCode, timer);
 }
 
 function normalizeGuessString(raw) {
@@ -859,6 +908,7 @@ io.on("connection", (socket) => {
     } else {
       room.players.set(socket.id, createPlayer(socket.id, playerName, clientId));
     }
+    cancelRoomCleanup(roomCode);
     socket.join(roomCode);
     socket.emit("room:rules", { rules: room.rules });
     socket.emit("room:teams", { teams: Array.from(room.teams.values()) });
@@ -890,6 +940,7 @@ io.on("connection", (socket) => {
       room.players.set(socket.id, createPlayer(socket.id, playerName, clientId));
       updated = true;
     }
+    cancelRoomCleanup(roomCode);
     socket.join(roomCode);
     socket.emit("room:state", serializeRoomState(room));
     if (updated) {
@@ -976,6 +1027,7 @@ io.on("connection", (socket) => {
     const room = rooms.get(roomCode);
     if (!room) return;
 
+    cancelRoomCleanup(roomCode);
     socket.join(roomCode);
 
     let player = room.players.get(socket.id);
@@ -1103,12 +1155,13 @@ io.on("connection", (socket) => {
     room.players.delete(socket.id);
     socket.leave(roomCode);
     if (room.players.size === 0) {
-      rooms.delete(roomCode);
+      scheduleRoomCleanupIfEmpty(roomCode, room);
       return;
     }
     io.to(roomCode).emit("room:players", {
       players: Array.from(room.players.values()),
     });
+    scheduleRoomCleanupIfEmpty(roomCode, room);
   });
 
   socket.on("player:kick", ({ roomCode, playerId } = {}) => {
@@ -1717,16 +1770,18 @@ io.on("connection", (socket) => {
           players: Array.from(room.players.values()),
         });
         broadcastRoomState(code, room);
+        scheduleRoomCleanupIfEmpty(code, room);
         break;
       }
       if (room.players.delete(socket.id)) {
         if (room.players.size === 0) {
-          rooms.delete(code);
+          scheduleRoomCleanupIfEmpty(code, room);
         } else {
           io.to(code).emit("room:players", {
             players: Array.from(room.players.values()),
           });
           broadcastRoomState(code, room);
+          scheduleRoomCleanupIfEmpty(code, room);
         }
         break;
       }
