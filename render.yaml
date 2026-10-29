@@ -4,6 +4,7 @@ services:
   - type: web
     name: hitster
     runtime: node
+    branch: main
     plan: free
     buildCommand: cd client && npm ci --include=dev && npm run build && cd ../server && npm ci
     startCommand: cd server && npm start
